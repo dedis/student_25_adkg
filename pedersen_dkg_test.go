@@ -103,7 +103,7 @@ func RunDKG(t *testing.T, tns []*TestNode, conf dkg.Config) ([]*dkg.Result, *sha
 
 	if len(justifs) == 0 {
 		// Get the public
-		publicPoly := share.NewPubPoly(suite, suite.Point().Base(), results[0].Key.Commits)
+		publicPoly := share.NewPubPoly(conf.Suite, conf.Suite.Point().Base(), results[0].Key.Commits)
 		publicKey := publicPoly.Eval(0)
 		return results, publicKey
 	}
@@ -119,7 +119,7 @@ func RunDKG(t *testing.T, tns []*TestNode, conf dkg.Config) ([]*dkg.Result, *sha
 	}
 
 	// Get the public
-	publicPoly := share.NewPubPoly(suite, suite.Point().Base(), results[0].Key.Commits)
+	publicPoly := share.NewPubPoly(conf.Suite, conf.Suite.Point().Base(), results[0].Key.Commits)
 	publicKey := publicPoly.Eval(0)
 
 	return results, publicKey

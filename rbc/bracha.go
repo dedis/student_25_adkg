@@ -1,120 +1,111 @@
 package rbc
 
 import (
-	"errors"
-	"go.dedis.ch/kyber/v4"
-	"student_25_adkg/networking"
 	"sync"
 )
 
-type BrachaRBC struct {
-	pred       func(kyber.Scalar) bool
+// Bracha's implementation of RBC
+type BrachaRBC[M any] struct {
+	RBC[M]
+	pred       func(M) bool
 	echoCount  int
 	readyCount int
 	threshold  int
 	sentReady  bool
 	finished   bool
-	value      kyber.Scalar
+	value      M
 	sync.RWMutex
 }
 
-type BrachaMsgType int8
-
-const (
-	Propose BrachaMsgType = iota
-	Echo
-	Ready
-)
-
-type BrachaMsg networking.Message[BrachaMsgType, kyber.Scalar]
-
-func NewBrachaMsg(t BrachaMsgType, s kyber.Scalar) *BrachaMsg {
-	msg := networking.NewMessage[BrachaMsgType, kyber.Scalar](t, s)
-	return (*BrachaMsg)(msg)
-}
-
-func NewBrachaRBC(pred func(scalar kyber.Scalar) bool, threshold int) *BrachaRBC {
-	return &BrachaRBC{
+// NewBrachaRBC creates a new Bracha RBC structure
+func NewBrachaRBC[M any](pred func(scalar M) bool, threshold int) *BrachaRBC[M] {
+	return &BrachaRBC[M]{
 		pred:       pred,
 		echoCount:  0,
 		readyCount: 0,
 		threshold:  threshold,
 		sentReady:  false,
 		finished:   false,
-		value:      nil,
 		RWMutex:    sync.RWMutex{},
 	}
 }
 
-func (rbc *BrachaRBC) Broadcast(s kyber.Scalar, iface networking.NetworkInterface[BrachaMsg]) error {
-	if rbc.finished {
-		return errors.New("BrachaRBC already finished")
-	}
-	return iface.Broadcast(*NewBrachaMsg(Propose, s))
+// Deal implements the method from the RBC interface
+func (rbc *BrachaRBC[M]) Deal(val M) (MessageType, M) {
+	return PROPOSE, val
 }
 
-func (rbc *BrachaRBC) ReceivePropose(s kyber.Scalar) (echo bool) {
+// HandleMsg implements the method from the RBC interface
+func (rbc *BrachaRBC[M]) HandleMsg(msgType MessageType, val M) (MessageType, M, bool, M, bool) {
+	switch msgType {
+	case PROPOSE:
+		echo := rbc.receivePropose(val)
+		return ECHO, val, echo, val, false
+	case ECHO:
+		ready := rbc.receiveEcho(val)
+		return READY, val, ready, val, false
+	case READY:
+		finished, ready := rbc.receiveReady(val)
+		if finished {
+			return msgType, val, false, val, true
+		}
+		return msgType, val, ready, val, false
+	default:
+		return msgType, val, false, val, false
+	}
+}
+
+// receivePropose handles the logic necessary when a PROPOSE message is received
+func (rbc *BrachaRBC[M]) receivePropose(s M) (echo bool) {
+	// If the predicate match, return that an echo message should be broadcast
 	return rbc.pred(s)
 }
 
-func (rbc *BrachaRBC) BroadcastEcho(s kyber.Scalar, iface networking.NetworkInterface[BrachaMsg]) error {
+// receiveEcho handles the logic necessary when a ECHO message is received
+func (rbc *BrachaRBC[M]) receiveEcho(s M) (ready bool) {
 	rbc.Lock()
 	defer rbc.Unlock()
-	if rbc.finished {
-		return errors.New("RBC finished")
-	}
-
-	err := iface.Broadcast(*NewBrachaMsg(Echo, s))
-	if err != nil {
-		return err
-	}
-	rbc.sentReady = true
-	return nil
-}
-
-func (rbc *BrachaRBC) ReceiveEcho(s kyber.Scalar) (ready bool) {
-	rbc.Lock()
-	defer rbc.Unlock()
-	// Don't do anything if the value doesn't match the predicate of the RBC protocol finished
+	// Don't do anything if the value doesn't match the predicate or the RBC protocol finished
 	if !rbc.pred(s) || rbc.finished {
 		return rbc.echoCount >= 2*rbc.threshold+1
 	}
+	// Increment the count of echo messages received
 	rbc.echoCount++
-	// return true to tell the caller to broadcast a ready only if the threshold is attained and a ready has not yet been sent
-	return rbc.echoCount > 2*rbc.threshold && !rbc.sentReady
+	// Send a ready message if we have received 2t+1 ECHO messages and have not sent yet a ready message
+	ready = rbc.echoCount > 2*rbc.threshold && !rbc.sentReady
+	// If a ready message is going to be sent, set the sentReady bool to true to prevent sending more
+	if ready {
+		rbc.sentReady = true
+	}
+	return ready
 }
 
-func (rbc *BrachaRBC) BroadcastReady(s kyber.Scalar, iface networking.NetworkInterface[BrachaMsg]) error {
+// ReceiveReady handles the reception of a READY message. If enough ready messages have been received, the protocol
+// returns finished=true and the value field is set. The ready bool specifies if a ready message should be sent
+func (rbc *BrachaRBC[M]) receiveReady(s M) (finished bool, ready bool) {
 	rbc.RLock()
 	defer rbc.RUnlock()
 	// Don't do anything if the value doesn't match the predicate of the RBC protocol finished
 	if !rbc.pred(s) || rbc.finished {
-		return errors.New("message doesn't abide to the predicate")
+		return false, false
 	}
-	err := iface.Broadcast(*NewBrachaMsg(Ready, s))
-	if err != nil {
-		return err
-	}
-	rbc.sentReady = true
-	return nil
-}
-
-// ReceiveReady handles the reception of a ready message. If enough ready messages have been received, the protocol
-// returns finished=true and the value of output can be read. If it is false, the value of output is to be ignored
-// and the value of ready specifies if a ready message should be sent
-func (rbc *BrachaRBC) ReceiveReady(s kyber.Scalar) (output kyber.Scalar, finished bool, ready bool) {
-	rbc.RLock()
-	defer rbc.RUnlock()
-	// Don't do anything if the value doesn't match the predicate of the RBC protocol finished
-	if !rbc.pred(s) || rbc.finished {
-		return s, false, false
-	}
+	// Increment the count of READY messages received
 	rbc.readyCount++
-	if rbc.readyCount > 2*rbc.threshold {
+
+	// Send a READY message if we have received enough READY messages and a READY message has not yet been sent by this node
+	ready = rbc.readyCount > rbc.threshold && !rbc.sentReady
+	// If ready, then mark that this node has sent a ready message
+	if ready {
+		rbc.sentReady = true
+	}
+
+	// Finish if we have received enough ready messages
+	finished = rbc.readyCount > 2*rbc.threshold
+	// if finishing, then set the value and the finished bool in the struct
+	if finished {
 		rbc.finished = true
 		rbc.value = s
-		return s, true, false
 	}
-	// Tell the caller to send a ready message if the threshold has been attained and a ready was not already sent
-	return s, false, rbc.readyCount > rbc.threshold && !rbc.sentReady
+
+	return finished, ready
 }

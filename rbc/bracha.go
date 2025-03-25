@@ -4,55 +4,67 @@ import (
 	"sync"
 )
 
-// Bracha's implementation of RBC
+// BrachaRBC implements RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
 type BrachaRBC[M any] struct {
 	RBC[M]
-	pred       func(M) bool
-	echoCount  int
-	readyCount int
-	threshold  int
-	sentReady  bool
-	finished   bool
-	value      M
+	pred             func(M) bool
+	echoCount        int
+	readyCount       int
+	threshold        int
+	sentReady        bool
+	finished         bool
+	value            M
+	marshalContent   func(M) ([]byte, error)
+	unmarshalContent func([]byte) (M, error)
 	sync.RWMutex
 }
 
-// NewBrachaRBC creates a new Bracha RBC structure
-func NewBrachaRBC[M any](pred func(scalar M) bool, threshold int) *BrachaRBC[M] {
+// NewBrachaRBC creates a new BrachaRBC structure. The marshal un unmarshal methods are used to convert the content
+// of the RBCMessage to and from the value type M
+func NewBrachaRBC[M any](pred func(M) bool, threshold int,
+	marshall func(M) ([]byte, error),
+	unmarshall func([]byte) (M, error)) *BrachaRBC[M] {
 	return &BrachaRBC[M]{
-		pred:       pred,
-		echoCount:  0,
-		readyCount: 0,
-		threshold:  threshold,
-		sentReady:  false,
-		finished:   false,
-		RWMutex:    sync.RWMutex{},
+		pred:             pred,
+		echoCount:        0,
+		readyCount:       0,
+		threshold:        threshold,
+		sentReady:        false,
+		finished:         false,
+		RWMutex:          sync.RWMutex{},
+		marshalContent:   marshall,
+		unmarshalContent: unmarshall,
 	}
 }
 
-// Deal implements the method from the RBC interface
-func (rbc *BrachaRBC[M]) Deal(val M) (MessageType, M) {
-	return PROPOSE, val
+// RBroadcast implements the method from the RBC interface
+func (rbc *BrachaRBC[M]) RBroadcast(content M) *RBCMessage[M] {
+	return NewRBCMessage(PROPOSE, content)
 }
 
 // HandleMsg implements the method from the RBC interface
-func (rbc *BrachaRBC[M]) HandleMsg(msgType MessageType, val M) (MessageType, M, bool, M, bool) {
-	switch msgType {
+func (rbc *BrachaRBC[M]) HandleMsg(message RBCMessage[M]) (*RBCMessage[M], bool) {
+	send := false
+	t := PROPOSE
+	finished := false
+	switch message.Type() {
 	case PROPOSE:
-		echo := rbc.receivePropose(val)
-		return ECHO, val, echo, val, false
+		send = rbc.receivePropose(message.Content())
+		t = ECHO
 	case ECHO:
-		ready := rbc.receiveEcho(val)
-		return READY, val, ready, val, false
+		send = rbc.receiveEcho(message.Content())
+		t = READY
 	case READY:
-		finished, ready := rbc.receiveReady(val)
-		if finished {
-			return msgType, val, false, val, true
-		}
-		return msgType, val, ready, val, false
+		finished, send = rbc.receiveReady(message.Content())
+		t = READY
 	default:
-		return msgType, val, false, val, false
+		send = false
 	}
+
+	if send {
+		return NewRBCMessage(t, message.Content()), finished
+	}
+	return nil, finished
 }
 
 // receivePropose handles the logic necessary when a PROPOSE message is received
@@ -108,4 +120,29 @@ func (rbc *BrachaRBC[M]) receiveReady(s M) (finished bool, ready bool) {
 	}
 
 	return finished, ready
+}
+
+// Marshal implements the marshal method from the RBC interface
+func (rbc *BrachaRBC[M]) Marshal(msg *RBCMessage[M]) ([]byte, error) {
+	// Make the type into a byte and concatenate with the content
+	typeByte := make([]byte, 1)
+	typeByte[0] = byte(msg.Type())
+	contentByte, err := rbc.marshalContent(msg.Content())
+	if err != nil {
+		return nil, err
+	}
+	marshalled := make([]byte, 1+len(contentByte))
+	marshalled[0] = typeByte[0]
+	copy(marshalled[1:], contentByte)
+	return marshalled, nil
+}
+
+// Unmarshal implements the unmarshal method from the RBC interface
+func (rbc *BrachaRBC[M]) Unmarshal(data []byte) (*RBCMessage[M], error) {
+	t := MessageType(data[0])
+	content, err := rbc.unmarshalContent(data[1:])
+	if err != nil {
+		return nil, err
+	}
+	return NewRBCMessage(t, content), nil
 }

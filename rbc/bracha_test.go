@@ -11,36 +11,39 @@ import (
 )
 
 type TestNode struct {
-	iface networking.NetworkInterface[BrachaMsg]
+	g     kyber.Group
+	iface networking.NetworkInterface[[]byte]
 	rbc   *BrachaRBC[kyber.Scalar]
 	stop  bool
 }
 
-func NewTestNode(iface networking.NetworkInterface[BrachaMsg], rbc *BrachaRBC[kyber.Scalar]) *TestNode {
+func NewTestNode(iface networking.NetworkInterface[[]byte], rbc *BrachaRBC[kyber.Scalar]) *TestNode {
 	return &TestNode{
 		iface: iface,
 		rbc:   rbc,
 	}
 }
 
-type BrachaMsg networking.Message[MessageType, kyber.Scalar]
+type BrachaMsg networking.Message[MessageType, []byte]
 
-func NewBrachaMsg(t MessageType, s kyber.Scalar) *BrachaMsg {
-	msg := networking.NewMessage[MessageType, kyber.Scalar](t, s)
+func NewBrachaMsg(t MessageType, s []byte) *BrachaMsg {
+	msg := networking.NewMessage[MessageType, []byte](t, s)
 	return (*BrachaMsg)(msg)
 }
 
-func (n *TestNode) HandleMessage(t *testing.T, received BrachaMsg) {
-	t.Logf("[%d] Received message type: %d, content: %s", n.iface.GetID(), received.MsgType, received.MsgContent.String())
-	msgType, val, send, output, finished := n.rbc.HandleMsg(received.MsgType, received.MsgContent)
+func (n *TestNode) HandleMessage(t *testing.T, received RBCMessage[kyber.Scalar]) {
+	t.Logf("[%d] Received message type: %d, content: %s", n.iface.GetID(), received.Type(), received.Content())
+	msg, finished := n.rbc.HandleMsg(received)
 	if finished {
+		output := n.rbc.value
 		t.Logf("[%d] Algorithm finished, value: %s", n.iface.GetID(), output.String())
 	}
 
-	if send {
-		t.Logf("[%d] Sendig message of type %d", n.iface.GetID(), msgType)
-		msg := *NewBrachaMsg(msgType, val)
-		err := n.iface.Broadcast(msg)
+	if msg != nil {
+		t.Logf("[%d] Sendig message of type %d", n.iface.GetID(), msg.Type())
+		msgBytes, err := n.rbc.Marshal(msg)
+		require.NoError(t, err)
+		err = n.iface.Broadcast(msgBytes)
 		require.NoError(t, err)
 	}
 	t.Logf("[%d] Nothing to do with the handled message", n.iface.GetID())
@@ -57,7 +60,9 @@ func (n *TestNode) Start(t *testing.T) {
 			if err != nil {
 				fmt.Printf("Error receiving message: %s\n", err)
 			}
-			n.HandleMessage(t, received)
+			rbcMessage, err := n.rbc.Unmarshal(received)
+			require.NoError(t, err)
+			n.HandleMessage(t, *rbcMessage)
 		}
 	}()
 }
@@ -70,7 +75,7 @@ func pred(kyber.Scalar) bool {
 // sometime for the algorithm to finish and then check all nodes finished and settles on the same value that was dealt
 func TestBrachaSimple(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[BrachaMsg]()
+	network := networking.NewFakeNetwork[[]byte]()
 	g := edwards25519.NewBlakeSHA256Ed25519()
 	s := g.Scalar().Pick(g.RandomStream())
 	threshold := 1
@@ -79,16 +84,24 @@ func TestBrachaSimple(t *testing.T) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		node := NewTestNode(network.JoinNetwork(), NewBrachaRBC(pred, threshold))
+		node := NewTestNode(network.JoinNetwork(), NewBrachaRBC(pred, threshold, func(scalar kyber.Scalar) ([]byte, error) {
+			data, err := scalar.MarshalBinary()
+			return data, err
+		}, func(bytes []byte) (kyber.Scalar, error) {
+			s := g.Scalar()
+			err := s.UnmarshalBinary(bytes)
+			return s, err
+		}))
 		nodes[i] = node
 		node.Start(t)
 	}
 
 	n1 := nodes[0]
 	// Start RBC
-	msgType, val := n1.rbc.Deal(s)
-	msg := *NewBrachaMsg(msgType, val)
-	err := n1.iface.Broadcast(msg)
+	msg := n1.rbc.RBroadcast(s)
+	msgBytes, err := n1.rbc.Marshal(msg)
+	require.NoError(t, err)
+	err = n1.iface.Broadcast(msgBytes)
 	require.NoError(t, err)
 
 	time.Sleep(4 * time.Second)

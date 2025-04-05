@@ -1,6 +1,10 @@
 package agreement
 
-import "sync"
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+)
 
 // BinSet is a thread-safe data structure consisting of a lock and a boolean array of size 2.
 type BinSet struct {
@@ -64,4 +68,23 @@ func (b *BinSet) Values() []int {
 		}
 	}
 	return values
+}
+
+// GetRandomValue returns a random value from the BinSet (0 or 1) if present. If the BinSet is empty, it returns -1.
+func (b *BinSet) GetRandomValue() (int, error) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	values := []int{}
+	for i, v := range b.array {
+		if v {
+			values = append(values, i)
+		}
+	}
+
+	if len(values) == 0 {
+		return -1, fmt.Errorf("can't return random value from an empty set")
+	}
+
+	return values[rand.Intn(len(values))], nil
 }

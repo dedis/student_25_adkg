@@ -10,7 +10,8 @@ type BVBroadcast struct {
 	nParticipants int
 	threshold     int
 	// BinValues     map[int]struct{}         // TODO Threadsafe
-	BinValues    map[int]struct{}         // set of at most 2 (0 and 1) TODO Threadsafe
+	// BinValues    map[int]struct{}         // set of at most 2 (0 and 1) TODO Threadsafe
+	BinValues    BinSet                   // set of at most 2 (0 and 1) TODO Threadsafe
 	received     map[int]map[int]struct{} //binval => pids from which received
 	notifyCh     chan struct{}            // notify caller about new binvalue (can be nil?)
 	shouldNotify bool
@@ -20,20 +21,6 @@ type BVBroadcast struct {
 
 	// received[msg.binValue] initialize for 0 and 1 in the beginning
 	// received      map[int]struct{} // pid => binval
-}
-
-func ContainsOne(binValues map[int]struct{}) bool {
-	if _, exists := binValues[1]; exists {
-		return true
-	}
-	return false
-}
-
-func ContainsZero(binValues map[int]struct{}) bool {
-	if _, exists := binValues[0]; exists {
-		return true
-	}
-	return false
 }
 
 // type BVMessage struct {
@@ -84,7 +71,8 @@ func (b *BVBroadcast) HandleMessage(msg BVMessage) (int, bool, error) {
 
 	if len(b.received[msg.binValue]) == 2*b.threshold+1 { // && hasn't seen but it's a set so does not natter
 		// b.BinValues[msg.binValue] = struct{}{}
-		b.BinValues[msg.binValue] = struct{}{}
+		// b.BinValues[msg.binValue] = struct{}{}
+		b.BinValues.AddValue(msg.binValue)
 		echoMsg := &BVMessage{sourceNode: b.nodeID, binValue: msg.binValue}
 		b.broadcast(echoMsg)
 		b.notifyCh <- struct{}{} // or close it

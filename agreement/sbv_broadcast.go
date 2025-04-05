@@ -32,11 +32,11 @@ func (s *SBVBroadcast) viewPredicate() (bool, [2]bool) {
 
 		view := [2]bool{false, false}
 		predTrue := false
-		if nZeros > 0 && ContainsZero(s.bv.BinValues) {
+		if nZeros > 0 && s.bv.BinValues.ContainsZero() {
 			view[0] = true
 			predTrue = true
 		}
-		if nOnes > 0 && ContainsOne(s.bv.BinValues) {
+		if nOnes > 0 && s.bv.BinValues.ContainsOne() {
 			view[1] = true
 			predTrue = true
 		}
@@ -58,12 +58,13 @@ func (s *SBVBroadcast) Broadcast(binValue int) error {
 		return err
 	}
 
-	if len(s.bv.BinValues) == 0 { // TODO Threadsafe
+	if s.bv.BinValues.Length() == 0 { // TODO Threadsafe
 		<-notifyCh
 	}
 
 	// // take w from binvalues and aux it
-	randomBinVal, _ := randBinSetVal(s.bv.BinValues) // TODO Threadsafe
+	// randomBinVal, _ := randBinSetVal(s.bv.BinValues) // TODO Threadsafe
+	randomBinVal, _ := s.bv.BinValues.GetRandomValue() // TODO Threadsafe
 
 	msg := AUXMessage{binValue: randomBinVal} //TODO finish
 

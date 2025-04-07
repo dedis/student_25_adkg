@@ -9,14 +9,14 @@ type SBVBroadcast struct {
 	// received      map[int]map[int]struct{} //binval => pids from which received
 	nodeID    int
 	bv        *BVBroadcast
-	broadcast func(IMessage)
+	broadcast func(IMessage) error
 	auxCh     chan *AUXMessage
 	// received  map[int]map[int]struct{} //pids from which AUX received => binval
 	received map[int]int // I think there is only 1 value from each node
 }
 
 // NewSBVBroadcast creates and returns a new instance of SBVBroadcast.
-func NewSBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage)) *SBVBroadcast {
+func NewSBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage) error) *SBVBroadcast {
 	bv := NewBVBroadcast(nParticipants, threshold, nodeID, broadcast)
 
 	return &SBVBroadcast{
@@ -71,7 +71,7 @@ func (s *SBVBroadcast) viewPredicate() (bool, [2]bool) {
 // or can return a channel where handleMessage will write
 func (s *SBVBroadcast) Broadcast(binValue int) (error, [2]bool, [2]bool) {
 	bvMsg := BVMessage{s.nodeID, binValue}
-	notifyCh, err := s.bv.Broadcast(bvMsg, true)
+	notifyCh, err := s.bv.Broadcast(&bvMsg, true)
 	if err != nil {
 		return err, [2]bool{}, [2]bool{}
 	}
@@ -94,7 +94,7 @@ func (s *SBVBroadcast) Broadcast(binValue int) (error, [2]bool, [2]bool) {
 		s.received[auxMsg.sourceNode] = auxMsg.binValue
 		complete, view := s.viewPredicate()
 		if complete {
-			return nil, view, s.bv.BinValues.asBools()
+			return nil, view, s.bv.BinValues.AsBools()
 		}
 	}
 	// get notified by handle message if aux

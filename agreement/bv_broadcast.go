@@ -5,32 +5,30 @@ import (
 	"sync"
 )
 
-type BVBroadcast struct {
+type BVBroadcast struct { // TODO: add logger
 	*sync.RWMutex
 	nParticipants int
 	threshold     int
-	// BinValues     map[int]struct{}         // TODO Threadsafe
-	// BinValues    map[int]struct{}         // set of at most 2 (0 and 1) TODO Threadsafe
-	BinValues    BinSet                   // set of at most 2 (0 and 1) TODO Threadsafe
-	received     map[int]map[int]struct{} //binval => pids from which received
-	notifyCh     chan struct{}            // notify caller about new binvalue (can be nil?)
-	shouldNotify bool
-	broadcasted  [2]bool // false is not yet broadcasted TODO Threadsafe
-	broadcast    func(IMessage)
-	nodeID       int
-
-	// received[msg.binValue] initialize for 0 and 1 in the beginning
-	// received      map[int]struct{} // pid => binval
+	BinValues     BinSet                   // set of at most 2 (0 and 1) TODO Threadsafe
+	received      map[int]map[int]struct{} //binval => pids from which received
+	notifyCh      chan struct{}            // notify caller about new binvalue (can be nil?)
+	shouldNotify  bool
+	broadcasted   [2]bool // false is not yet broadcasted TODO Threadsafe
+	broadcast     func(IMessage) error
+	nodeID        int
 }
 
-// NewBVBroadcast creates and returns a new instance of BVBroadcast.
-func NewBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage)) *BVBroadcast {
+func NewBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage) error) *BVBroadcast {
+	received := make(map[int]map[int]struct{})
+	received[0] = make(map[int]struct{})
+	received[1] = make(map[int]struct{})
+
 	return &BVBroadcast{
 		RWMutex:       &sync.RWMutex{},
 		nParticipants: nParticipants,
 		threshold:     threshold,
 		BinValues:     *NewBinSet(),
-		received:      make(map[int]map[int]struct{}),
+		received:      received,
 		notifyCh:      make(chan struct{}),
 		broadcasted:   [2]bool{false, false},
 		broadcast:     broadcast,
@@ -48,19 +46,24 @@ func NewBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessag
 // 7: 	if BVAL(v) received from 2t + 1 different nodes then
 // 8: 		bin_values ← bin_values ∪ {v}
 
-func (b *BVBroadcast) Broadcast(msg BVMessage, trackUpdates bool) (chan struct{}, error) {
-	// broadcast
-	// how do I return binvalues here? they are empty...
-	// should I return a channel to notify about new incoming binvalues?
+func (b *BVBroadcast) Broadcast(msg *BVMessage, trackUpdates bool) (chan struct{}, error) {
 	b.shouldNotify = trackUpdates
+	if !b.broadcasted[msg.binValue] {
+		b.broadcasted[msg.binValue] = true
+		err := b.broadcast(msg)
+
+		if err != nil {
+			return nil, fmt.Errorf("error broadcasting message %v %w", msg, err)
+		}
+	}
+
 	return b.notifyCh, nil
 }
 
 // should keep track of rounds?
 // TODO pass interface?
-func (b *BVBroadcast) HandleMessage(msg BVMessage) (int, bool, error) {
+func (b *BVBroadcast) HandleMessage(msg *BVMessage) (int, bool, error) {
 
-	// this should be received instead of binval
 	if msg.binValue != 0 && msg.binValue != 1 {
 		return 0, false, fmt.Errorf("invalid binary value %d from node %d", msg.binValue, msg.sourceNode)
 	}
@@ -69,25 +72,25 @@ func (b *BVBroadcast) HandleMessage(msg BVMessage) (int, bool, error) {
 		return 0, false, fmt.Errorf("redundant bv_broadcast from node %d", msg.sourceNode)
 	}
 
-	// b.binValues[msg.sourceNode] = msg.binValue
+	b.received[msg.binValue][msg.sourceNode] = struct{}{}
+	// fmt.Printf("at node %d: BVMessage %d %d, received: %v\n", b.nodeID, msg.sourceNode, msg.binValue, b.received[1])
 
-	if len(b.received[msg.binValue]) >= b.threshold+1 && !b.broadcasted[msg.binValue] { //TODO and v not yet broadcasted
+	if len(b.received[msg.binValue]) >= b.threshold+1 && !b.broadcasted[msg.binValue] { //lock broadcasted
+		// fmt.Printf("node %d, broadcasted: %v\n", b.nodeID, b.broadcasted[msg.binValue])
 		b.broadcasted[msg.binValue] = true
-		b.broadcast(&msg)
-		// broadcast binValue asynchronously
-		// if haven't done already. Should done why? When?
-		// return msg or send to outbox
+		echoMsg := &BVMessage{sourceNode: b.nodeID, binValue: msg.binValue}
+		err := b.broadcast(echoMsg)
+		if err != nil {
+			return 0, false, fmt.Errorf("error broadcasting message %v %w", msg, err)
+		}
 	}
 
-	if len(b.received[msg.binValue]) == 2*b.threshold+1 { // && hasn't seen but it's a set so does not natter
-		// b.BinValues[msg.binValue] = struct{}{}
-		// b.BinValues[msg.binValue] = struct{}{}
+	if len(b.received[msg.binValue]) == 2*b.threshold+1 { // lock received?
 		b.BinValues.AddValue(msg.binValue)
-		echoMsg := &BVMessage{sourceNode: b.nodeID, binValue: msg.binValue}
-		b.broadcast(echoMsg)
-		b.notifyCh <- struct{}{} // or close it
-		// return? like
-		// return msg.binValue, true, nil
+		if b.shouldNotify {
+			b.notifyCh <- struct{}{} // or close it
+		}
+		return msg.binValue, true, nil
 
 	}
 

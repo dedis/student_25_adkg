@@ -58,7 +58,7 @@ func (b *BinSet) AddValue(value int) {
 }
 
 // Values returns a slice of integers representing the values (0 or 1) that are true in the array.
-func (b *BinSet) asInts() []int {
+func (b *BinSet) AsInts() []int {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	values := []int{}
@@ -70,7 +70,7 @@ func (b *BinSet) asInts() []int {
 	return values
 }
 
-func (b *BinSet) asBools() [2]bool {
+func (b *BinSet) AsBools() [2]bool {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	return b.array

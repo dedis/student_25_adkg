@@ -23,10 +23,20 @@ type BVBroadcast struct {
 	// received      map[int]struct{} // pid => binval
 }
 
-// type BVMessage struct {
-// 	sourceNode int
-// 	binValue   int
-// }
+// NewBVBroadcast creates and returns a new instance of BVBroadcast.
+func NewBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage)) *BVBroadcast {
+	return &BVBroadcast{
+		RWMutex:       &sync.RWMutex{},
+		nParticipants: nParticipants,
+		threshold:     threshold,
+		BinValues:     *NewBinSet(),
+		received:      make(map[int]map[int]struct{}),
+		notifyCh:      make(chan struct{}),
+		broadcasted:   [2]bool{false, false},
+		broadcast:     broadcast,
+		nodeID:        nodeID,
+	}
+}
 
 // 1: bin_values ← ∅
 // 2: send BVAL(v) to all

@@ -1,16 +1,33 @@
 package agreement
 
+import "fmt"
+
 type SBVBroadcast struct {
 	nParticipants int
 	threshold     int
 	// binValues     map[int]int              //pid => binVal // could just be a set?
 	// received      map[int]map[int]struct{} //binval => pids from which received
 	nodeID    int
-	bv        BVBroadcast
+	bv        *BVBroadcast
 	broadcast func(IMessage)
-	auxCh     chan int
+	auxCh     chan *AUXMessage
 	// received  map[int]map[int]struct{} //pids from which AUX received => binval
 	received map[int]int // I think there is only 1 value from each node
+}
+
+// NewSBVBroadcast creates and returns a new instance of SBVBroadcast.
+func NewSBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage)) *SBVBroadcast {
+	bv := NewBVBroadcast(nParticipants, threshold, nodeID, broadcast)
+
+	return &SBVBroadcast{
+		nParticipants: nParticipants,
+		threshold:     threshold,
+		nodeID:        nodeID,
+		bv:            bv,
+		broadcast:     broadcast,
+		auxCh:         make(chan *AUXMessage),
+		received:      make(map[int]int),
+	}
 }
 
 func (s *SBVBroadcast) viewPredicate() (bool, [2]bool) {
@@ -51,11 +68,12 @@ func (s *SBVBroadcast) viewPredicate() (bool, [2]bool) {
 	return false, [2]bool{}
 }
 
-func (s *SBVBroadcast) Broadcast(binValue int) error {
+// or can return a channel where handleMessage will write
+func (s *SBVBroadcast) Broadcast(binValue int) (error, [2]bool, [2]bool) {
 	bvMsg := BVMessage{s.nodeID, binValue}
 	notifyCh, err := s.bv.Broadcast(bvMsg, true)
 	if err != nil {
-		return err
+		return err, [2]bool{}, [2]bool{}
 	}
 
 	if s.bv.BinValues.Length() == 0 { // TODO Threadsafe
@@ -64,7 +82,7 @@ func (s *SBVBroadcast) Broadcast(binValue int) error {
 
 	// // take w from binvalues and aux it
 	// randomBinVal, _ := randBinSetVal(s.bv.BinValues) // TODO Threadsafe
-	randomBinVal, _ := s.bv.BinValues.GetRandomValue() // TODO Threadsafe
+	randomBinVal, _ := s.bv.BinValues.RandomValue() // TODO Threadsafe
 
 	msg := AUXMessage{binValue: randomBinVal} //TODO finish
 
@@ -72,11 +90,21 @@ func (s *SBVBroadcast) Broadcast(binValue int) error {
 
 	// var auxVal int
 	// // loop
-	// auxVal = <-s.auxCh
+	for auxMsg := range s.auxCh {
+		s.received[auxMsg.sourceNode] = auxMsg.binValue
+		complete, view := s.viewPredicate()
+		if complete {
+			return nil, view, s.bv.BinValues.asBools()
+		}
+	}
 	// get notified by handle message if aux
 	// call viewPredicate
 
-	return nil
+	return fmt.Errorf(
+			"sbv broadcast did not succeed: received aux messages from %d out of %d participants",
+			len(s.received), s.nParticipants),
+		[2]bool{},
+		[2]bool{}
 }
 
 // func (s *SBVBroadcast) HandleMessage(m *Message) error {
@@ -86,7 +114,10 @@ func (s *SBVBroadcast) HandleMessage(m *AUXMessage) error { // its easiear with 
 
 	// if aux -> notify
 
-	<-s.auxCh
+	// remember source nodes who have already sent
+	// if
+
+	s.auxCh <- m
 
 	return nil
 }

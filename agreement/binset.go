@@ -58,7 +58,7 @@ func (b *BinSet) AddValue(value int) {
 }
 
 // Values returns a slice of integers representing the values (0 or 1) that are true in the array.
-func (b *BinSet) Values() []int {
+func (b *BinSet) asInts() []int {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	values := []int{}
@@ -70,8 +70,14 @@ func (b *BinSet) Values() []int {
 	return values
 }
 
+func (b *BinSet) asBools() [2]bool {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	return b.array
+}
+
 // GetRandomValue returns a random value from the BinSet (0 or 1) if present. If the BinSet is empty, it returns -1.
-func (b *BinSet) GetRandomValue() (int, error) {
+func (b *BinSet) RandomValue() (int, error) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 

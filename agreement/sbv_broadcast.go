@@ -17,7 +17,8 @@ type SBVBroadcast struct {
 
 // NewSBVBroadcast creates and returns a new instance of SBVBroadcast.
 func NewSBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage) error) *SBVBroadcast {
-	bv := NewBVBroadcast(nParticipants, threshold, nodeID, broadcast)
+	shouldNotify := true
+	bv := NewBVBroadcast(nParticipants, threshold, nodeID, broadcast, shouldNotify)
 
 	return &SBVBroadcast{
 		nParticipants: nParticipants,

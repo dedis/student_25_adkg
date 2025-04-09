@@ -2,20 +2,19 @@ package networking
 
 import (
 	"fmt"
-	"student_25_adkg/tools"
 )
 
 // FakeNetwork is a structure implementing a network. It connects the interfaces of all nodes. T is the type of the
 // messages
 type FakeNetwork[T any] struct {
-	nodes map[int]tools.Queue[T]
-	in    tools.Queue[T]
+	nodes map[int]chan T
+	in    chan T
 }
 
 func NewFakeNetwork[T any]() *FakeNetwork[T] {
 	return &FakeNetwork[T]{
-		nodes: make(map[int]tools.Queue[T]),
-		in:    tools.NewConcurrentQueue[T](50),
+		nodes: make(map[int]chan T),
+		in:    make(chan T, 100),
 	}
 }
 
@@ -24,7 +23,7 @@ func (n *FakeNetwork[T]) freshID() int {
 }
 
 func (n *FakeNetwork[T]) JoinNetwork() *FakeInterface[T] {
-	queue := tools.NewConcurrentQueue[T](10)
+	queue := make(chan T, 100)
 	iface := NewFakeInterface[T](queue, n.Send, n.Broadcast, n.freshID())
 
 	n.nodes[iface.id] = iface.rcvQueue
@@ -38,7 +37,8 @@ func (n *FakeNetwork[T]) Send(msg T, to int) error {
 		return fmt.Errorf("destination node %d not found", to)
 	}
 	// Put the message in the recipient's receive channel
-	return rcv.Push(msg)
+	rcv <- msg
+	return nil
 }
 
 func (n *FakeNetwork[T]) Broadcast(msg T) error {
@@ -57,21 +57,19 @@ type NetworkInterface[T any] interface {
 	Send(T, int) error
 	// Broadcast send the given byte message to everyone else in the network
 	Broadcast(T) error
-	// HasMessage checks if the reception channel contains a message
-	HasMessage() bool
 	// Receive dequeues message received, nil if there are no messages pending
 	Receive() (T, error)
 	GetID() int
 }
 
 type FakeInterface[T any] struct {
-	rcvQueue     tools.Queue[T]
+	rcvQueue     chan T
 	sendMsg      func(T, int) error
 	broadcastMsg func(T) error
 	id           int
 }
 
-func NewFakeInterface[T any](rcv tools.Queue[T], sendMsg func(T, int) error,
+func NewFakeInterface[T any](rcv chan T, sendMsg func(T, int) error,
 	broadcastMsg func(T) error, id int) *FakeInterface[T] {
 	return &FakeInterface[T]{
 		rcvQueue:     rcv,
@@ -89,12 +87,9 @@ func (f *FakeInterface[T]) Broadcast(msg T) error {
 	return f.broadcastMsg(msg)
 }
 
-func (f *FakeInterface[T]) HasMessage() bool {
-	return !f.rcvQueue.IsEmpty()
-}
-
 func (f *FakeInterface[T]) Receive() (T, error) {
-	return f.rcvQueue.Pop()
+	val := <-f.rcvQueue
+	return val, nil
 }
 
 func (f *FakeInterface[T]) GetID() int {

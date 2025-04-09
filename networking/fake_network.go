@@ -52,15 +52,16 @@ func (n *FakeNetwork[T]) Broadcast(msg T) error {
 }
 
 // NetworkInterface represents an interface used by a node to communicate in the network
-type NetworkInterface interface {
+type NetworkInterface[T any] interface {
 	// Send allows to send a byte message to a recipient addressed by an int
-	Send([]byte, int) error
+	Send(T, int) error
 	// Broadcast send the given byte message to everyone else in the network
-	Broadcast([]byte) error
+	Broadcast(T) error
 	// HasMessage checks if the reception channel contains a message
 	HasMessage() bool
 	// Receive dequeues message received, nil if there are no messages pending
-	Receive() ([]byte, error)
+	Receive() (T, error)
+	GetID() int
 }
 
 type FakeInterface[T any] struct {
@@ -94,4 +95,8 @@ func (f *FakeInterface[T]) HasMessage() bool {
 
 func (f *FakeInterface[T]) Receive() (T, error) {
 	return f.rcvQueue.Pop()
+}
+
+func (f *FakeInterface[T]) GetID() int {
+	return f.id
 }

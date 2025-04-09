@@ -1,0 +1,29 @@
+syntax='proto3';
+package typedefs;
+option go_package ='./typedefs';
+message Message{
+  message Propose{
+    repeated bytes content=1;
+  }
+
+  message Echo{
+    bytes mi=1;
+    bytes h=2;
+    int32  i=3;
+  }
+
+  message Ready{
+    bytes mi=1;
+    bytes h=2;
+    int32 i=3;
+  }
+
+  oneof op{
+    Propose propose_inst=3;
+    Echo echo_inst=4;
+    Ready ready_inst=5;
+  }
+}
+message Instruction {
+  Message operation=1;
+}

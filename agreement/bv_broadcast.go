@@ -5,20 +5,31 @@ import (
 	"sync"
 )
 
-type BVBroadcast struct { // TODO: add logger
-	*sync.RWMutex
+// Figure 1 from Signature-Free_Asynchronous_Binary_Byzantine_Consensus
+// 1: bin_values ← ∅
+// 2: send BVAL(v) to all
+// 3: return bin_values . bin_values has not necessarily
+// reached its final value when returned
+// 4: upon receiving BVAL(v) do
+// 5: 	if BVAL(v) received from t + 1 different nodes then
+// 6: 		send BVAL(v) to all (if haven’t done already)
+// 7: 	if BVAL(v) received from 2t + 1 different nodes then
+// 8: 		bin_values ← bin_values ∪ {v}
+
+// TODO: add logger
+type BVBroadcast struct {
+	*sync.RWMutex // to lock received and broadcasted
 	nParticipants int
 	threshold     int
-	BinValues     BinSet                   // set of at most 2 (0 and 1) TODO Threadsafe
-	received      map[int]map[int]struct{} //binval => pids from which received
-	notifyCh      chan struct{}            // notify caller about new binvalue (can be nil?)
-	shouldNotify  bool
-	broadcasted   [2]bool // false is not yet broadcasted TODO Threadsafe
+	BinValues     BinSet                   // Threadsafe set of at most 2 values (0 and 1)
+	received      map[int]map[int]struct{} // binval => pids from which received
+	broadcasted   [2]bool                  // false means that idx is not yet broadcasted as binVal
+	notifyCh      chan struct{}            // notify caller about new binvalue
 	broadcast     func(IMessage) error
 	nodeID        int
 }
 
-func NewBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage) error, shouldNotify bool) *BVBroadcast {
+func NewBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage) error) *BVBroadcast {
 	received := make(map[int]map[int]struct{})
 	received[0] = make(map[int]struct{})
 	received[1] = make(map[int]struct{})
@@ -30,30 +41,22 @@ func NewBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessag
 		BinValues:     *NewBinSet(),
 		received:      received,
 		notifyCh:      make(chan struct{}, 2), //can have 0 and 1
-		shouldNotify:  shouldNotify,
 		broadcasted:   [2]bool{false, false},
 		broadcast:     broadcast,
 		nodeID:        nodeID,
 	}
 }
 
-// 1: bin_values ← ∅
-// 2: send BVAL(v) to all
-// 3: return bin_values . bin_values has not necessarily
-// reached its final value when returned
-// 4: upon receiving BVAL(v) do
-// 5: 	if BVAL(v) received from t + 1 different nodes then
-// 6: 		send BVAL(v) to all (if haven’t done already)
-// 7: 	if BVAL(v) received from 2t + 1 different nodes then
-// 8: 		bin_values ← bin_values ∪ {v}
-
-func (b *BVBroadcast) Broadcast(msg *BVMessage, trackUpdates bool) (chan struct{}, error) {
+// BV is supposed to return set binValues to SBV and SBV is blocked
+// until binValues is not empty.
+// Instead returns a channel to notify SBV about updates to binValues.
+func (b *BVBroadcast) Broadcast(msg *BVMessage) (chan struct{}, error) {
 	b.Lock()
+	// could have already echoed this binValue before broadcasted its own
 	shouldBroadcast := !b.broadcasted[msg.binValue]
 	if shouldBroadcast {
 		b.broadcasted[msg.binValue] = true
 	}
-	b.shouldNotify = trackUpdates
 	b.Unlock()
 
 	if shouldBroadcast {
@@ -69,9 +72,6 @@ func (b *BVBroadcast) Broadcast(msg *BVMessage, trackUpdates bool) (chan struct{
 // should keep track of rounds?
 // TODO pass interface?
 func (b *BVBroadcast) HandleMessage(msg *BVMessage) (int, bool, error) {
-	// b.Lock()
-	// defer b.Unlock()
-
 	if msg.binValue != 0 && msg.binValue != 1 {
 		return 0, false, fmt.Errorf("invalid binary value %d from node %d", msg.binValue, msg.sourceNode)
 	}
@@ -100,18 +100,13 @@ func (b *BVBroadcast) HandleMessage(msg *BVMessage) (int, bool, error) {
 	}
 	b.RLock()
 	defer b.RUnlock()
-	// fmt.Printf("halo before from %d\n", b.nodeID)
 
 	if len(b.received[msg.binValue]) >= 2*b.threshold+1 && !b.BinValues.AsBools()[msg.binValue] {
 		b.BinValues.AddValue(msg.binValue)
-		// fmt.Printf("medium halo from %d and shouldNotify == %v\n", b.nodeID, b.shouldNotify)
 
-		if b.shouldNotify {
-			// fmt.Printf("halo from %d\n\n\n", b.nodeID)
-			b.notifyCh <- struct{}{}
-		}
+		b.notifyCh <- struct{}{}
 		return msg.binValue, true, nil
 	}
 
-	return 0, false, nil // TODO change for real return value
+	return 0, false, nil // TODO maybe return value not needed at all
 }

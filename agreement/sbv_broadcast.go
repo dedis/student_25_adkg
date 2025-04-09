@@ -17,8 +17,7 @@ type SBVBroadcast struct {
 
 // NewSBVBroadcast creates and returns a new instance of SBVBroadcast.
 func NewSBVBroadcast(nParticipants, threshold, nodeID int, broadcast func(IMessage) error) *SBVBroadcast {
-	shouldNotify := true
-	bv := NewBVBroadcast(nParticipants, threshold, nodeID, broadcast, shouldNotify)
+	bv := NewBVBroadcast(nParticipants, threshold, nodeID, broadcast)
 
 	return &SBVBroadcast{
 		nParticipants: nParticipants,
@@ -72,7 +71,7 @@ func (s *SBVBroadcast) viewPredicate() (bool, [2]bool) {
 // or can return a channel where handleMessage will write
 func (s *SBVBroadcast) Broadcast(binValue int) (error, [2]bool, [2]bool) {
 	bvMsg := BVMessage{s.nodeID, binValue}
-	notifyCh, err := s.bv.Broadcast(&bvMsg, true)
+	notifyCh, err := s.bv.Broadcast(&bvMsg)
 	if err != nil {
 		return err, [2]bool{}, [2]bool{}
 	}

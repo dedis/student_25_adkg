@@ -68,7 +68,7 @@ func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
 		nbNodes:     nbNodes,
 		finalValue:  nil,
 		finished:    false,
-		log:         log.New(os.Stdout, fmt.Sprintf("[%d]", i), log.LstdFlags|log.Lshortfile),
+		log:         log.New(os.Stdout, fmt.Sprintf("[%d] ", i), log.LstdFlags|log.Lshortfile),
 		i:           i,
 	}
 }
@@ -103,20 +103,37 @@ func (frRbc *FourRoundRBC[M]) broadcast(ms []M) error {
 	return err
 }
 
+func (frRbc *FourRoundRBC[M]) start(cancelFunc context.CancelFunc) {
+	go func() {
+		for {
+			bs, err := frRbc.iface.Receive()
+			if err != nil {
+				frRbc.log.Printf("Error receiving: %v", err)
+				continue
+			}
+			msg := &typedefs.Instruction{}
+			err = proto.Unmarshal(bs, msg)
+			if err != nil {
+				frRbc.log.Printf("Error unmasharalling: %v", err)
+				continue
+			}
+			err, finished := frRbc.handleMessage(msg)
+			if err != nil {
+				frRbc.log.Printf("Error handling message: %v", err)
+				continue
+			}
+			if finished {
+				frRbc.log.Printf("Protocol terminated")
+				cancelFunc()
+				return
+			}
+		}
+	}()
+}
+
 func (frRbc *FourRoundRBC[M]) RBroadcast(m []M) error {
 	ctx, cancel := context.WithCancel(context.Background())
-	frRbc.iface.AddHandler(func(bytes []byte) error {
-		msg := &typedefs.Instruction{}
-		err := proto.Unmarshal(bytes, msg)
-		if err != nil {
-			return err
-		}
-		err, finished := frRbc.handleMessage(msg)
-		if finished { // TODO check if we should make sure err is nil before reading finished (in theory no if we always return false in case of an error)
-			cancel()
-		}
-		return err
-	})
+	frRbc.start(cancel)
 
 	// Send the broadcast
 	err := frRbc.broadcast(m)
@@ -126,35 +143,14 @@ func (frRbc *FourRoundRBC[M]) RBroadcast(m []M) error {
 	}
 
 	<-ctx.Done()
-
 	return nil
 }
 
 func (frRbc *FourRoundRBC[M]) Listen() error {
 	ctx, cancel := context.WithCancel(context.Background())
-	frRbc.iface.AddHandler(func(received []byte) error {
-		// TODO make this handler method re-usable as it is exactly the same used in the RBroadcast method
-		if received == nil {
-			return nil
-		}
-		msg := &typedefs.Instruction{}
-		err := proto.Unmarshal(received, msg)
-		if err != nil {
-			return err
-		}
-		if err != nil {
-			return err
-		}
-		err, finished := frRbc.handleMessage(msg)
-		if finished {
-			cancel()
-		}
-		return nil
-	})
+	frRbc.start(cancel)
 
-	// Now the handler registered above will take over the control flow, and we just need to wait for the context
 	<-ctx.Done()
-
 	return nil
 }
 
@@ -252,7 +248,7 @@ func (frRbc *FourRoundRBC[M]) receiveEcho(msg *typedefs.Message_Echo) error {
 		hashReady := frRbc.checkReadyThreshold(frRbc.readyCounts.GetOrDefault(string(msg.H), 0))
 
 		// Check if we received enough (taking into account if we already received enough ready messages for that hash
-		if frRbc.checkEchoThreshold(count+1, hashReady) && !frRbc.sentReady {
+		if frRbc.checkEchoThreshold(count, hashReady) && !frRbc.sentReady {
 			sendReady = true
 		}
 
@@ -284,17 +280,17 @@ func (frRbc *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
 		if !ok {
 			return 1
 		}
+		count += 1
 
 		// If enough READY messages have been received and enough ECHO messages, then send a READY message
 		// if not already sent
 		echoes, ok := frRbc.echoCount.Get(string(msg.H))
-		if ok && !frRbc.sentReady && frRbc.checkReadyThreshold(count+1) && frRbc.checkReadyThreshold(echoes) {
+		if ok && !frRbc.sentReady && frRbc.checkReadyThreshold(count) && frRbc.checkReadyThreshold(echoes) {
 			sendReady = true
 		}
 
 		// Return the new count to be set
-		frRbc.log.Printf("Received %d ready message(s)", count+1)
-		return count + 1
+		return count
 	})
 
 	if sendReady {
@@ -356,7 +352,7 @@ func (frRbc *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
 
 func (frRbc *FourRoundRBC[M]) reconstruct(expHash []byte) ([]M, bool, error) {
 	for ri := 0; ri < frRbc.r; ri++ {
-		if len(frRbc.th) < 2*frRbc.threshold+frRbc.r+1 {
+		if len(frRbc.th) < 2*frRbc.threshold+ri+1 {
 			// If it is not the case now, it won't be in the next iteration since r increases
 			return nil, false, nil
 		}

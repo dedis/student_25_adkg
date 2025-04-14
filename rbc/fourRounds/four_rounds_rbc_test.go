@@ -24,9 +24,9 @@ type TestNode struct {
 	stop  bool
 }
 
+// MockAuthStream mocks an authenticated message stream. Nothing is actually authenticated.
 type MockAuthStream struct {
-	Network  networking.NetworkInterface[[]byte]
-	handlers []*func([]byte) error
+	Network networking.NetworkInterface[[]byte]
 }
 
 func NewMockAuthStream(iface networking.NetworkInterface[[]byte]) *MockAuthStream {
@@ -39,26 +39,9 @@ func (iface *MockAuthStream) Broadcast(bytes []byte) error {
 	return iface.Network.Broadcast(bytes)
 }
 
-func (iface *MockAuthStream) AddHandler(handler func([]byte) error) {
-	iface.handlers = append(iface.handlers, &handler)
-}
-
-func (iface *MockAuthStream) Start(t *testing.T) {
-	go func() {
-		for {
-			msg, err := iface.Network.Receive()
-			if err != nil {
-				t.Logf("Error receiving message: %v", err)
-			}
-
-			for _, handler := range iface.handlers {
-				err = (*handler)(msg)
-				if err != nil {
-					t.Logf("Error handling message: %v", err)
-				}
-			}
-		}
-	}()
+func (iface *MockAuthStream) Receive() ([]byte, error) {
+	msg, err := iface.Network.Receive()
+	return msg, err
 }
 
 func NewTestNode(iface *MockAuthStream, rbc *FourRoundRBC[kyber.Scalar]) *TestNode {
@@ -68,11 +51,11 @@ func NewTestNode(iface *MockAuthStream, rbc *FourRoundRBC[kyber.Scalar]) *TestNo
 	}
 }
 
-func startIfaceDumper(iface networking.NetworkInterface[[]byte]) context.CancelFunc {
+func startDummyNode(stream *MockAuthStream) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		for {
-			_, _ = iface.Receive()
+			_, _ = stream.Receive()
 			if ctx.Err() != nil {
 				return
 			}
@@ -151,8 +134,8 @@ func marshallMessage(msg []kyber.Scalar, group kyber.Group) [][]byte {
 	return ms
 }
 
-// TestRBC_Receive_Propose tests that a node correctly handles the reception of a PROPOSE message
-func TestRBC_Receive_Propose(t *testing.T) {
+// TestFourRoundsRBC_Receive_Propose tests that a node correctly handles the reception of a PROPOSE message
+func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 
 	// Set up a fake network
 	network := networking.NewFakeNetwork[[]byte]()
@@ -169,7 +152,6 @@ func TestRBC_Receive_Propose(t *testing.T) {
 	stream := NewMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
 	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
-	stream.Start(t)
 	go func() {
 		err := node.rbc.Listen()
 		require.NoError(t, err)
@@ -177,12 +159,12 @@ func TestRBC_Receive_Propose(t *testing.T) {
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	ifaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
+	interfaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
 	cancellers := make([]context.CancelFunc, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
-		ifaces[i] = iface
-		cancellers[i] = startIfaceDumper(iface)
+		interfaces[i] = iface
+		cancellers[i] = startDummyNode(NewMockAuthStream(iface))
 	}
 
 	// Send a PROPOSE message to the test node and check that it answers correctly
@@ -195,12 +177,12 @@ func TestRBC_Receive_Propose(t *testing.T) {
 		panic(err)
 	}
 
-	err = ifaces[1].Send(proposeBytes, nIface.GetID())
+	err = interfaces[1].Send(proposeBytes, nIface.GetID())
 	require.NoError(t, err)
 	t.Logf("Send PROPOSE message to %d", nIface.GetID())
 
 	// Wait a second for message to have been sent
-	time.Sleep(1 * time.Second)
+	time.Sleep(10 * time.Millisecond)
 
 	// Stop all listening networks
 	for _, canceller := range cancellers {
@@ -208,7 +190,7 @@ func TestRBC_Receive_Propose(t *testing.T) {
 	}
 
 	// Expect each interface to have received an echo message for each chunk
-	for i, iface := range ifaces {
+	for i, iface := range interfaces {
 		sent := iface.GetSent()
 
 		if i == 1 {
@@ -232,7 +214,7 @@ func TestRBC_Receive_Propose(t *testing.T) {
 			require.NoError(t, err)
 			switch op := msg.Operation.Op.(type) {
 			case *typedefs.Message_EchoInst:
-				require.Equal(t, int32(j), op.EchoInst.I)
+				require.Equal(t, uint32(j), op.EchoInst.I)
 				require.True(t, bytes.Equal(op.EchoInst.H, sHash))
 			default:
 				require.Fail(t, "Unexpected message type: %T", msg)
@@ -251,7 +233,7 @@ func TestRBC_Receive_Propose(t *testing.T) {
 	require.Equal(t, 1+nbNodes, len(nReceived))
 
 	// Try to reconstruct from the encoded messages
-	messages := ifaces[0].GetReceived()
+	messages := interfaces[0].GetReceived()
 	chunks := make([]*share.PriShare, nbNodes)
 	for i := 0; i < len(messages); i++ {
 		bs := messages[i]
@@ -281,10 +263,10 @@ func TestRBC_Receive_Propose(t *testing.T) {
 	}
 }
 
-// TestRBC_Receive_Echo checks that a node correctly handles receiving ECHO messages
+// TestFourRoundsRBC_Receive_Echo checks that a node correctly handles receiving ECHO messages
 // Send 2t+1 ECHO messages checking that nothing happens before the 2t+1-th is received and
 // then a READY is sent only once
-func TestRBC_Receive_Echo(t *testing.T) {
+func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	// Set up a fake network
 	network := networking.NewFakeNetwork[[]byte]()
 
@@ -299,7 +281,6 @@ func TestRBC_Receive_Echo(t *testing.T) {
 	stream := NewMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
 	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
-	stream.Start(t)
 	go func() {
 		err := node.rbc.Listen()
 		require.NoError(t, err)
@@ -307,13 +288,13 @@ func TestRBC_Receive_Echo(t *testing.T) {
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	ifaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
+	intefaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
 	cancellers := make([]context.CancelFunc, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
-		ifaces[i] = iface
+		intefaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		cancellers[i] = startIfaceDumper(iface)
+		cancellers[i] = startDummyNode(NewMockAuthStream(iface))
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -326,11 +307,11 @@ func TestRBC_Receive_Echo(t *testing.T) {
 	sent := 0
 	for i := 0; i < echoThreshold-1; i++ {
 		// Send the ECHO message to the real node
-		err := ifaces[0].Send(echoBytes, nIface.GetID())
+		err := intefaces[0].Send(echoBytes, nIface.GetID())
 		require.NoError(t, err)
 		sent += 1
 		// Wait a few milliseconds to make sure the node received and processed the message
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 
 		nReceived := nIface.GetReceived()
 		// Should have received every message
@@ -341,14 +322,14 @@ func TestRBC_Receive_Echo(t *testing.T) {
 	}
 
 	// Sent an ECHO message for another share of the encoding and expect nothing to happen
-	echoMsg2 := createEchoMessage(fakeMi, hash, ifaces[0].GetID())
+	echoMsg2 := createEchoMessage(fakeMi, hash, intefaces[0].GetID())
 	echoBytes2, err := proto.Marshal(echoMsg2)
 	require.NoError(t, err)
-	err = ifaces[0].Send(echoBytes2, nIface.GetID())
+	err = intefaces[0].Send(echoBytes2, nIface.GetID())
 	require.NoError(t, err)
 	sent += 1
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	nReceived := nIface.GetReceived()
 	// Should have received all messages
@@ -358,11 +339,11 @@ func TestRBC_Receive_Echo(t *testing.T) {
 	require.Equal(t, 0, len(nSent))
 
 	// Sent another echo and expect a ready message to be broadcast
-	err = ifaces[0].Send(echoBytes, nIface.GetID())
+	err = intefaces[0].Send(echoBytes, nIface.GetID())
 	require.NoError(t, err)
 	sent += 1
 	// Wait sometime to leave time for the node to have sent all its messages
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	nReceived = nIface.GetReceived()
 	// Should have received every ECHO message plus its own broadcast
@@ -373,17 +354,17 @@ func TestRBC_Receive_Echo(t *testing.T) {
 	require.Equal(t, 1, len(nSent))
 
 	// All other interfaces should have received one
-	for _, iface := range ifaces {
+	for _, iface := range intefaces {
 		received := iface.GetReceived()
 		require.Equal(t, 1, len(received))
 	}
 
 	// Send another ECHO and check that no other message is sent by the node
-	err = ifaces[0].Send(echoBytes, nIface.GetID())
+	err = intefaces[0].Send(echoBytes, nIface.GetID())
 	require.NoError(t, err)
 	sent += 1
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	nReceived = nIface.GetReceived()
 	// Should have received all messages plus its own broadcast
 	require.Equal(t, sent+1, len(nReceived))
@@ -391,7 +372,7 @@ func TestRBC_Receive_Echo(t *testing.T) {
 	nSent = nIface.GetSent()
 	// Should only have sent a single ECHO message
 	require.Equal(t, 1, len(nSent))
-	for _, iface := range ifaces {
+	for _, iface := range intefaces {
 		received := iface.GetReceived()
 		// Should only have received one ECHO from the node
 		require.Equal(t, 1, len(received))
@@ -403,11 +384,11 @@ func TestRBC_Receive_Echo(t *testing.T) {
 	}
 }
 
-// TestRBC_Receive_Ready checks that a node correctly handles receiving READY messages
+// TestFourRoundsRBC_Receive_Ready_before checks that a node correctly handles receiving READY messages
 // Send t ready messages and expect nothing to be sent back. Then send t+1-th message
 // and expect nothing until t+1 ECHO message for its corresponding share of the
 // encoding is received
-func TestRBC_Receive_Ready_before(t *testing.T) {
+func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	// Set up a fake network
 	network := networking.NewFakeNetwork[[]byte]()
 
@@ -422,7 +403,6 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 	stream := NewMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
 	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
-	stream.Start(t)
 	go func() {
 		err := node.rbc.Listen()
 		require.NoError(t, err)
@@ -430,13 +410,13 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	ifaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
+	interfaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
 	cancellers := make([]context.CancelFunc, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
-		ifaces[i] = iface
+		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		cancellers[i] = startIfaceDumper(iface)
+		cancellers[i] = startDummyNode(NewMockAuthStream(iface))
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -450,7 +430,7 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 	// Send t READY messages and expect nothing each time
 	sent := 0
 	for i := 0; i < readyThreshold-1; i++ {
-		err := ifaces[0].Send(readyBytes, nIface.GetID())
+		err := interfaces[0].Send(readyBytes, nIface.GetID())
 		require.NoError(t, err)
 		sent += 1
 
@@ -466,11 +446,11 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 	}
 
 	// Send t+1 message and expect nothing
-	err = ifaces[0].Send(readyBytes, nIface.GetID())
+	err = interfaces[0].Send(readyBytes, nIface.GetID())
 	require.NoError(t, err)
 	sent += 1
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	nReceived := nIface.GetReceived()
 	require.Equal(t, sent, len(nReceived))
@@ -478,7 +458,7 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 	nSent := nIface.GetSent()
 	require.Equal(t, 0, len(nSent))
 
-	for _, iface := range ifaces {
+	for _, iface := range interfaces {
 		received := iface.GetReceived()
 		// Should not have received anything yet
 		require.Equal(t, 0, len(received))
@@ -491,7 +471,7 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 
 	echoThreshold := threshold + 1
 	for i := 0; i < echoThreshold-1; i++ {
-		err := ifaces[0].Send(echoBytes, nIface.GetID())
+		err := interfaces[0].Send(echoBytes, nIface.GetID())
 		require.NoError(t, err)
 		sent += 1
 
@@ -507,9 +487,9 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 	}
 
 	// Sent t+1 and t+2 ECHO and the node should have sent one READY message
-	err = ifaces[0].Send(echoBytes, nIface.GetID())
+	err = interfaces[0].Send(echoBytes, nIface.GetID())
 	require.NoError(t, err)
-	err = ifaces[0].Send(echoBytes, nIface.GetID())
+	err = interfaces[0].Send(echoBytes, nIface.GetID())
 	require.NoError(t, err)
 	sent += 2
 
@@ -523,7 +503,7 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 	// Should have sent a READY broadcast
 	require.Equal(t, 1, len(nSent))
 
-	for _, iface := range ifaces {
+	for _, iface := range interfaces {
 		received := iface.GetReceived()
 		// Should have received a READY broadcast from the node
 		require.Equal(t, 1, len(received))
@@ -531,9 +511,9 @@ func TestRBC_Receive_Ready_before(t *testing.T) {
 
 }
 
-// TestRBC_Receive_Ready_after does a  similar test to TestRBC_Receive_Ready_before but
+// TestFourRoundsRBC_Receive_Ready_after does a  similar test to TestRBC_Receive_Ready_before but
 // here the node receives the ECHO messages before receiving the t+1 ready message
-func TestRBC_Receive_Ready_after(t *testing.T) {
+func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	// Set up a fake network
 	network := networking.NewFakeNetwork[[]byte]()
 
@@ -548,7 +528,6 @@ func TestRBC_Receive_Ready_after(t *testing.T) {
 	stream := NewMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
 	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
-	stream.Start(t)
 	go func() {
 		err := node.rbc.Listen()
 		require.NoError(t, err)
@@ -556,13 +535,13 @@ func TestRBC_Receive_Ready_after(t *testing.T) {
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	ifaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
+	interfaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
 	cancellers := make([]context.CancelFunc, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
-		ifaces[i] = iface
+		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		cancellers[i] = startIfaceDumper(iface)
+		cancellers[i] = startDummyNode(NewMockAuthStream(iface))
 	}
 
 	// Create a READY message
@@ -582,7 +561,7 @@ func TestRBC_Receive_Ready_after(t *testing.T) {
 	echoThreshold := threshold + 1
 	sent := 0
 	for i := 0; i < echoThreshold; i++ {
-		err := ifaces[0].Send(echoBytes, nIface.GetID())
+		err := interfaces[0].Send(echoBytes, nIface.GetID())
 		require.NoError(t, err)
 		sent += 1
 
@@ -600,7 +579,7 @@ func TestRBC_Receive_Ready_after(t *testing.T) {
 	readyThreshold := threshold + 1
 	// Send t READY messages and expect nothing each time
 	for i := 0; i < readyThreshold-1; i++ {
-		err := ifaces[0].Send(readyBytes, nIface.GetID())
+		err := interfaces[0].Send(readyBytes, nIface.GetID())
 		require.NoError(t, err)
 		sent += 1
 
@@ -616,13 +595,13 @@ func TestRBC_Receive_Ready_after(t *testing.T) {
 	}
 
 	// Send the t+1 and t+2 READY message and expect one READY broadcast
-	err = ifaces[0].Send(readyBytes, nIface.GetID())
+	err = interfaces[0].Send(readyBytes, nIface.GetID())
 	require.NoError(t, err)
-	err = ifaces[0].Send(readyBytes, nIface.GetID())
+	err = interfaces[0].Send(readyBytes, nIface.GetID())
 	require.NoError(t, err)
 	sent += 2
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(10 * time.Millisecond)
 
 	nReceived := nIface.GetReceived()
 	// Should have received all messages plus its own broadcast
@@ -637,7 +616,7 @@ func TestRBC_Receive_Ready_after(t *testing.T) {
 	_, ok := msg.Operation.Op.(*typedefs.Message_ReadyInst)
 	require.True(t, ok, "Message received should be a READY message")
 
-	for _, iface := range ifaces {
+	for _, iface := range interfaces {
 		received := iface.GetReceived()
 		// Should all have received a ready message
 		require.Equal(t, 1, len(received))
@@ -650,9 +629,61 @@ func TestRBC_Receive_Ready_after(t *testing.T) {
 	}
 }
 
-// TestFourRoundsRBCSimple creates a network of 3 nodes with a threshold of 1 and then lets one node start dealing and waits
-// sometime for the algorithm to finish and then check all nodes finished and settles on the same value that was dealt
-func TestFourRoundsRBCSimple(t *testing.T) {
+/***********************************************************************************************/
+/************************************** Integration Tests **************************************/
+/***********************************************************************************************/
+
+// runBroadcast takes the node at index 0 from the given list of nodes and tells it to start RBC with the given
+// message msg. All other nodes are set to listen. The method returns when the algorithm finished
+// for all nodes
+func runBroadcast(t *testing.T, nodes []*TestNode, nbNodes int, msg []kyber.Scalar) {
+	// Create a wait group to wait for all bracha instances to finish
+	wg := sync.WaitGroup{}
+	n1 := nodes[0]
+	for i := 1; i < nbNodes; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := nodes[i].rbc.Listen()
+			if err != nil {
+				// Log
+				t.Logf("Error listening: %v", err)
+			}
+			t.Logf("Node %d done", i)
+		}()
+	}
+	// Start RBC
+	err := n1.rbc.RBroadcast(msg)
+	t.Log("Broadcast complete")
+	require.NoError(t, err)
+
+	wg.Wait()
+}
+
+// checkRBCResult checks that the state of the given node reflect a successfully completion of
+// an RBC algorithm given the reliably broadcast message msg. Doesn't return true of false but
+// makes the testing fail in case of a problem
+func checkRBCResult(t *testing.T, nodes []*TestNode, nbNodes int, msg []kyber.Scalar) {
+	for i := 0; i < nbNodes; i++ {
+		n := nodes[i]
+		val := n.rbc.finalValue
+		finished := n.rbc.finished
+		require.True(t, finished)
+		require.True(t, len(msg) == len(val))
+		for i := 0; i < len(val); i++ {
+			require.True(t, msg[i].Equal(val[i]))
+		}
+	}
+}
+
+func runAndCheckRBC(t *testing.T, nodes []*TestNode, nbNodes int, msg []kyber.Scalar) {
+	runBroadcast(t, nodes, nbNodes, msg)
+	checkRBCResult(t, nodes, nbNodes, msg)
+}
+
+// TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
+// Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
+func TestFourRoundsRBC_Simple(t *testing.T) {
 	// Config
 	network := networking.NewFakeNetwork[[]byte]()
 
@@ -675,39 +706,145 @@ func TestFourRoundsRBCSimple(t *testing.T) {
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
 			r, nbNodes, uint32(i)))
 		nodes[i] = node
-		stream.Start(t)
 	}
 
-	// Create a wait group to wait for all bracha instances to finish
-	wg := sync.WaitGroup{}
-	n1 := nodes[0]
-	for i := 1; i < nbNodes; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := nodes[i].rbc.Listen()
-			if err != nil {
-				// Log
-				t.Logf("Error listening: %v", err)
-			}
-			t.Logf("Node %d done", i)
-		}()
-	}
-	// Start RBC
-	err := n1.rbc.RBroadcast(s)
-	t.Log("Broadcast complete")
-	require.NoError(t, err)
+	// Run RBC and check the result
+	runAndCheckRBC(t, nodes, nbNodes, s)
+}
 
-	wg.Wait()
+// TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
+// Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
+// In this situation, 1 node is dead and we expect the algorithm to finish for all nodes alive correctly.
+func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
 
-	// Check that all nodes settled on the same correct value and all finished
-	for _, n := range nodes {
-		val := n.rbc.finalValue
-		finished := n.rbc.finished
-		require.True(t, finished)
-		require.True(t, len(s) == len(val))
-		for i := 0; i < len(val); i++ {
-			require.True(t, s[i].Equal(val[i]))
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	nbDead := 1
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the working nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes-nbDead; i++ {
+		stream := NewMockAuthStream(network.JoinNetwork())
+		marshaller := &ScalarMarshaller{
+			Group: g,
 		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
 	}
+
+	// Set up the dead nodes
+	deadNodes := make([]*MockAuthStream, nbDead)
+	for i := 0; i < nbDead; i++ {
+		// Dead nodes just mean a node that joins the network but never receives or sends anything
+		// i.e. creating a stream but never using it
+		stream := NewMockAuthStream(network.JoinNetwork())
+		deadNodes[i] = stream
+	}
+
+	// Run and check RBC
+	runAndCheckRBC(t, nodes, nbNodes-nbDead, s)
+}
+
+// TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
+// Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
+// In this situation, 2 nodes are dead, and we expect the algorithm to finish for all nodes alive correctly.
+func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	nbDead := 2
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the working nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes-nbDead; i++ {
+		stream := NewMockAuthStream(network.JoinNetwork())
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Set up the dead nodes
+	deadNodes := make([]*MockAuthStream, nbDead)
+	for i := 0; i < nbDead; i++ {
+		// Dead nodes just mean a node that joins the network but never receives or sends anything
+		// i.e. creating a stream but never using it
+		stream := NewMockAuthStream(network.JoinNetwork())
+		deadNodes[i] = stream
+	}
+
+	// Run and check RBC
+	runAndCheckRBC(t, nodes, nbNodes-nbDead, s)
+}
+
+// TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
+// Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
+// In this situation, 3 nodes are dead, and we expect the algorithm to never finish.
+func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	timeout := time.Second * 5 // Wait five seconds
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	nbDead := 3
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the working nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes-nbDead; i++ {
+		stream := NewMockAuthStream(network.JoinNetwork())
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Set up the dead nodes
+	deadNodes := make([]*MockAuthStream, nbDead)
+	for i := 0; i < nbDead; i++ {
+		// Dead nodes just mean a node that joins the network but never receives or sends anything
+		// i.e. creating a stream but never using it
+		stream := NewMockAuthStream(network.JoinNetwork())
+		deadNodes[i] = stream
+	}
+
+	// Run RBC in a go routing and call cancel on the context when the method returns (i.e. when the algorithm ends)
+	go func() {
+		runBroadcast(t, nodes, nbNodes-nbDead, s)
+		cancel()
+	}()
+
+	// Wait for the context
+	<-ctx.Done()
+
+	// Require the deadline to have exceeded
+	require.Equal(t, ctx.Err(), context.DeadlineExceeded)
 }

@@ -8,9 +8,9 @@ type AuthenticatedMessageBroadcaster interface {
 }
 
 type AuthenticatedMessageReceiverHandler interface {
-	// AddHandler registers the given function to be called when new messages
-	// come in.
-	AddHandler(func([]byte) error)
+	// Receive blocks until a message is received and returns this message or an error
+	// if anything bad happened
+	Receive() ([]byte, error)
 }
 
 // AuthenticatedMessageStream is an interface provided by the node to allow secure communication

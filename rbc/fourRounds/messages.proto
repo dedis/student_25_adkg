@@ -9,13 +9,13 @@ message Message{
   message Echo{
     bytes mi=1;
     bytes h=2;
-    int32  i=3;
+    uint32  i=3;
   }
 
   message Ready{
     bytes mi=1;
     bytes h=2;
-    int32 i=3;
+    uint32 i=3;
   }
 
   oneof op{

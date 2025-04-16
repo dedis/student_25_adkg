@@ -797,7 +797,6 @@ func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
 }
 
 // TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
-// Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
 // In this situation, 3 nodes are dead, and we expect the algorithm to never finish.
 func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 	// Config
@@ -847,4 +846,76 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 
 	// Require the deadline to have exceeded
 	require.Equal(t, ctx.Err(), context.DeadlineExceeded)
+}
+
+// TestFourRoundsRBC_DealAndDies creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
+// In this situation, the dealer deals and then dies immediately. We expect the algorithm to finish correctly for all other nodes.
+func TestFourRoundsRBC_DealAndDies(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		stream := NewMockAuthStream(network.JoinNetwork())
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Set all nodes to listen except from one which will be the dead one
+	// Create a wait group to wait for all instances to finish
+	wg := sync.WaitGroup{}
+	for i := 0; i < nbNodes-1; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := nodes[i].rbc.Listen()
+			if err != nil {
+				// Log
+				t.Logf("Error listening: %v", err)
+			}
+			t.Logf("Node %d done", i)
+		}()
+	}
+
+	// Create a dying dealer. We don't need to actually create an RBC instance, we just need to send the PROPOSE
+	// from some node in the network and never answer after that
+	dyingDealer := NewMockAuthStream(network.JoinNetwork())
+
+	// Start RBC from the dying dealer
+
+	// Marshall the message
+	marshaller := getMarshaller(g)
+	msBytes := make([][]byte, len(s))
+	for i, m := range s {
+		b, err := marshaller.Marshal(m)
+		require.NoError(t, err)
+		msBytes[i] = b
+	}
+	inst := createProposeMessage(msBytes)
+	out, err := proto.Marshal(inst)
+	require.NoError(t, err)
+
+	// Broadcast the initial PROPOSE message to start RBC
+	err = dyingDealer.Broadcast(out)
+	require.NoError(t, err)
+	t.Log("Broadcast complete")
+
+	wg.Wait()
+
+	// Check that everything worked
+	checkRBCResult(t, nodes, nbNodes-1, s)
 }

@@ -4,18 +4,42 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/rs/zerolog"
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/share"
 	"golang.org/x/xerrors"
 	"google.golang.org/protobuf/proto"
 	"hash"
-	"log"
 	"os"
+	"strconv"
 	"student_25_adkg/rbc"
 	"student_25_adkg/rbc/fourRounds/typedefs"
 	"student_25_adkg/reedsolomon"
 	"student_25_adkg/tools"
 	"sync"
+	"time"
+)
+
+// Define the logger
+var (
+	logout = zerolog.ConsoleWriter{
+		Out:        os.Stdout,
+		TimeFormat: time.RFC3339,
+		// Format the node ID
+		FormatPrepare: func(e map[string]interface{}) error {
+			e["id"] = fmt.Sprintf("[%s]", e["id"])
+			return nil
+		},
+		// Change the order in which things appear
+		PartsOrder: []string{
+			zerolog.TimestampFieldName,
+			zerolog.LevelFieldName,
+			"id",
+			zerolog.MessageFieldName,
+		},
+		// Prevent the id from being printed again
+		FieldsExclude: []string{"id"},
+	}
 )
 
 // Marshaller represents an interface for an object that can marshal
@@ -43,13 +67,29 @@ type FourRoundRBC[M any] struct {
 	nbNodes    int
 	finalValue []M
 	finished   bool
-	log        *log.Logger
+	log        zerolog.Logger
 	i          uint32
 }
 
 func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
 	iface rbc.AuthenticatedMessageStream,
 	marshaller Marshaller[M], group kyber.Group, r, nbNodes int, i uint32) *FourRoundRBC[M] {
+
+	// Disable logging based on the GLOG environment variable
+	var logLevel zerolog.Level
+	if os.Getenv("GLOG") == "no" {
+		logLevel = zerolog.Disabled
+	} else {
+		logLevel = zerolog.InfoLevel
+	}
+
+	logger := zerolog.New(logout).
+		Level(logLevel).
+		With().
+		Timestamp().
+		Str("id", strconv.Itoa(int(i))).
+		Logger()
+
 	return &FourRoundRBC[M]{
 		iface:       iface,
 		marshaller:  marshaller,
@@ -68,7 +108,7 @@ func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
 		nbNodes:     nbNodes,
 		finalValue:  nil,
 		finished:    false,
-		log:         log.New(os.Stdout, fmt.Sprintf("[%d] ", i), log.LstdFlags|log.Lshortfile),
+		log:         logger,
 		i:           i,
 	}
 }
@@ -108,22 +148,22 @@ func (frRbc *FourRoundRBC[M]) start(cancelFunc context.CancelFunc) {
 		for {
 			bs, err := frRbc.iface.Receive()
 			if err != nil {
-				frRbc.log.Printf("Error receiving: %v", err)
+				frRbc.log.Err(err).Msg("Error receiving message")
 				continue
 			}
 			msg := &typedefs.Instruction{}
 			err = proto.Unmarshal(bs, msg)
 			if err != nil {
-				frRbc.log.Printf("Error unmasharalling: %v", err)
+				frRbc.log.Err(err).Msg("Error unmarshalling")
 				continue
 			}
 			err, finished := frRbc.handleMessage(msg)
 			if err != nil {
-				frRbc.log.Printf("Error handling message: %v", err)
+				frRbc.log.Err(err).Msg("Error handling message")
 				continue
 			}
 			if finished {
-				frRbc.log.Printf("Protocol terminated")
+				frRbc.log.Err(err).Msg("Protocol terminated")
 				cancelFunc()
 				return
 			}
@@ -159,13 +199,13 @@ func (frRbc *FourRoundRBC[M]) handleMessage(instruction *typedefs.Instruction) (
 	finished := false
 	switch op := instruction.Operation.Op.(type) {
 	case *typedefs.Message_ProposeInst:
-		frRbc.log.Printf("Received propose message")
+		frRbc.log.Info().Msg("Received propose message")
 		err = frRbc.receivePropose(op.ProposeInst)
 	case *typedefs.Message_EchoInst:
-		frRbc.log.Printf("Received echo message with i %d and msg: %x", op.EchoInst.I, op.EchoInst.Mi)
+		frRbc.log.Info().Msgf("Received echo message with i %d and msg: %x", op.EchoInst.I, op.EchoInst.Mi)
 		err = frRbc.receiveEcho(op.EchoInst)
 	case *typedefs.Message_ReadyInst:
-		frRbc.log.Printf("Received ready message")
+		frRbc.log.Info().Msg("Received ready message")
 		finished = frRbc.receiveReady(op.ReadyInst)
 	}
 
@@ -221,7 +261,7 @@ func (frRbc *FourRoundRBC[M]) receivePropose(m *typedefs.Message_Propose) error 
 			return err
 		}
 	}
-	frRbc.log.Printf("Sent %d echo messages", len(encodings))
+	frRbc.log.Info().Msgf("Sent %d echo messages", len(encodings))
 	return nil
 }
 

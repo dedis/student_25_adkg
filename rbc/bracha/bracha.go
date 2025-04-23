@@ -136,7 +136,7 @@ func (b *BrachaRBC) RBroadcast(content bool) error {
 
 	err := b.startBroadcast(content)
 	if err != nil {
-		return err // TODO check this
+		return err
 	}
 
 	// Now the handler registered above will take over the control flow, and we just need to wait for the context

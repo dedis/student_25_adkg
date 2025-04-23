@@ -24,15 +24,6 @@ type MockAuthStream struct {
 	writeDelay time.Duration
 }
 
-func NewMockAuthStream(iface networking.NetworkInterface[[]byte], readDelay, writeDelay time.Duration) *MockAuthStream {
-	return &MockAuthStream{
-		Network:    iface,
-		rcvChan:    make(chan []byte),
-		readDelay:  readDelay,
-		writeDelay: writeDelay,
-	}
-}
-
 func NoDelayMockAuthStream(iface networking.NetworkInterface[[]byte]) *MockAuthStream {
 	return &MockAuthStream{
 		Network:    iface,
@@ -70,7 +61,6 @@ func pred(bool) bool {
 func TestBrachaSimple(t *testing.T) {
 	// Config
 	network := networking.NewFakeNetwork[[]byte]()
-	s := true // Arbitrary binary value
 	threshold := 1
 	nbNodes := 3
 
@@ -98,7 +88,7 @@ func TestBrachaSimple(t *testing.T) {
 		}()
 	}
 	// Start RBC
-	err := n1.rbc.RBroadcast(s)
+	err := n1.rbc.RBroadcast(true)
 	t.Log("Broadcast complete")
 	require.NoError(t, err)
 
@@ -108,6 +98,6 @@ func TestBrachaSimple(t *testing.T) {
 		val := n.rbc.value
 		finished := n.rbc.finished
 		require.True(t, finished)
-		require.True(t, s == val)
+		require.True(t, val) // The value sent is True
 	}
 }

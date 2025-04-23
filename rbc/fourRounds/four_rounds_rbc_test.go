@@ -200,7 +200,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	t.Logf("Sent PROPOSE message to %d", nIface.GetID())
 
 	// Wait a second for message to have been sent
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	// Expect each interface to have received an echo message for each chunk
 	for i, iface := range interfaces {

@@ -354,7 +354,7 @@ func (f *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
 		inst := createReadyMessage(msg.Mi, msg.H, msg.I)
 		err := f.broadcastInstruction(inst)
 		if err != nil {
-			// TODO better error handling
+			f.log.Err(err).Msg("Failed to broadcast ready message")
 			return false
 		}
 		f.sentReady = true

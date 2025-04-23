@@ -16,7 +16,6 @@ import (
 	"student_25_adkg/rbc"
 	"student_25_adkg/rbc/fourRounds/typedefs"
 	"student_25_adkg/reedsolomon"
-	"student_25_adkg/tools"
 	"sync"
 	"time"
 )
@@ -60,9 +59,9 @@ type FourRoundRBC[M any] struct {
 	threshold int
 	sentReady bool
 	sync.RWMutex
-	echoCount   tools.ConcurrentMap[string, int]
-	readyCounts tools.ConcurrentMap[string, int]
-	readyMis    tools.ConcurrentMap[string, map[string]struct{}]
+	echoCount   map[string]int
+	readyCounts map[string]int
+	readyMis    map[string]map[string]struct{}
 	th          []*share.PriShare
 	kyber.Group
 	r          int
@@ -102,9 +101,9 @@ func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
 		threshold:   threshold,
 		sentReady:   false,
 		RWMutex:     sync.RWMutex{},
-		echoCount:   *tools.NewConcurrentMap[string, int](),
-		readyCounts: *tools.NewConcurrentMap[string, int](),
-		readyMis:    *tools.NewConcurrentMap[string, map[string]struct{}](),
+		echoCount:   make(map[string]int),
+		readyCounts: make(map[string]int),
+		readyMis:    make(map[string]map[string]struct{}),
 		th:          make([]*share.PriShare, 0),
 		Group:       group,
 		r:           r,
@@ -263,7 +262,7 @@ func (f *FourRoundRBC[M]) receivePropose(m *typedefs.Message_Propose) error {
 	// Encode to have a share to send for each node
 	encodings, err := f.rs.Encode(scalars, f.nbNodes)
 
-	// Broadcast an echo message for each encoding (TODO: should do only one broadcast with all values?)
+	// Broadcast an echo message for each encoding
 	for _, Mi := range encodings {
 		if Mi == nil {
 			return err
@@ -283,8 +282,8 @@ func (f *FourRoundRBC[M]) receivePropose(m *typedefs.Message_Propose) error {
 }
 
 func (f *FourRoundRBC[M]) receiveEcho(msg *typedefs.Message_Echo) error {
-	f.RLock()
-	defer f.RUnlock()
+	f.Lock()
+	defer f.Unlock()
 
 	// Ignore ECHO message that are not for our index
 	if msg.I != f.id {
@@ -292,24 +291,25 @@ func (f *FourRoundRBC[M]) receiveEcho(msg *typedefs.Message_Echo) error {
 	}
 
 	// Count this message and check if we need to send a READY message
-	sendReady := false
-	f.echoCount.DoAndSet(string(msg.H), func(count int, ok bool) int {
-		// Update the count
-		if !ok {
-			count = 0
-		}
-		count += 1
+	count, ok := f.echoCount[string(msg.H)]
+	// Update the count
+	if !ok {
+		count = 0
+	}
+	count += 1
 
-		// If the hash has received enough READY messages, then the threshold only needs be t+1
-		hashReady := f.checkReadyThreshold(f.readyCounts.GetOrDefault(string(msg.H), 0))
+	// Update the count
+	f.echoCount[string(msg.H)] = count
 
-		// Check if we received enough (taking into account if we already received enough ready messages for that hash
-		if f.checkEchoThreshold(count, hashReady) && !f.sentReady {
-			sendReady = true
-		}
+	// If the hash has received enough READY messages, then the threshold only needs be t+1
+	readyCount, ok := f.readyCounts[string(msg.H)]
+	if !ok {
+		readyCount = 0
+	}
+	hashReady := f.checkReadyThreshold(readyCount)
 
-		return count
-	})
+	// Check if we received enough (taking into account if we already received enough ready messages for that hash)
+	sendReady := f.checkEchoThreshold(count, hashReady) && !f.sentReady
 
 	if !sendReady {
 		return nil
@@ -327,27 +327,22 @@ func (f *FourRoundRBC[M]) receiveEcho(msg *typedefs.Message_Echo) error {
 }
 
 func (f *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
-	f.RLock()
-	defer f.RUnlock()
+	f.Lock()
+	defer f.Unlock()
 
 	// Update the count of ready message received for that hash and check if a READY message needs to be sent
-	sendReady := false
-	f.readyCounts.DoAndSet(string(msg.H), func(count int, ok bool) int {
-		if !ok {
-			return 1
-		}
-		count += 1
+	count, ok := f.readyCounts[string(msg.H)]
+	if !ok {
+		count = 0
+	}
+	count += 1
+	// Update the count
+	f.readyCounts[string(msg.H)] = count
 
-		// If enough READY messages have been received and enough ECHO messages, then send a READY message
-		// if not already sent
-		echoes, ok := f.echoCount.Get(string(msg.H))
-		if ok && !f.sentReady && f.checkReadyThreshold(count) && f.checkReadyThreshold(echoes) {
-			sendReady = true
-		}
-
-		// Return the new count to be set
-		return count
-	})
+	// If enough READY messages have been received and enough ECHO messages, then send a READY message
+	// if not already sent
+	echoes, ok := f.echoCount[string(msg.H)]
+	sendReady := ok && !f.sentReady && f.checkReadyThreshold(count) && f.checkReadyThreshold(echoes)
 
 	if sendReady {
 		// Send the ready message and set sentReady
@@ -361,21 +356,21 @@ func (f *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
 		f.log.Printf("Sent Ready message for %x", msg.Mi)
 	}
 
-	firstTime := false
-	finished := false
 	var value []M = nil
-	f.readyMis.DoAndSet(string(msg.H), func(hashMis map[string]struct{}, ok bool) map[string]struct{} {
-		if !ok {
-			hashMis = make(map[string]struct{})
-		}
-		_, notFirst := hashMis[string(msg.Mi)]
-		firstTime = !notFirst
+	hashMis, ok := f.readyMis[string(msg.H)]
 
-		// Put the value in the map
-		hashMis[string(msg.Mi)] = struct{}{}
-		return hashMis
-	})
+	if !ok {
+		hashMis = make(map[string]struct{})
+	}
+	_, notFirst := hashMis[string(msg.Mi)]
+	firstTime := !notFirst
 
+	// Put the value in the map
+	hashMis[string(msg.Mi)] = struct{}{}
+	// Update the map
+	f.readyMis[string(msg.H)] = hashMis
+
+	finished := false
 	// If this value is seen for the first time, add it to T_h and try to reconstruct
 	if firstTime {
 		MiScalar := f.Scalar()

@@ -7,10 +7,10 @@ type AuthenticatedMessageBroadcaster interface {
 	Broadcast([]byte) error
 }
 
-type AuthenticatedMessageReceiverHandler interface {
-	// Receive blocks until a message is received and returns this message or an error
-	// if anything bad happened
-	Receive() ([]byte, error)
+type AuthenticatedMessageReceiver interface {
+	// Receive blocks until a message is received and returns this message or an error or the given channel
+	// is return to. The channel is used to stop waiting for a message.
+	Receive(<-chan struct{}) ([]byte, error)
 }
 
 // AuthenticatedMessageStream is an interface provided by the node to allow secure communication
@@ -19,14 +19,29 @@ type AuthenticatedMessageReceiverHandler interface {
 // to this RBC instance.
 type AuthenticatedMessageStream interface {
 	AuthenticatedMessageBroadcaster
-	AuthenticatedMessageReceiverHandler
+	AuthenticatedMessageReceiver
 }
 
 // RBC is an interface for an RBC protocol. M represents the type of the value that the protocol broadcasts
 type RBC[M any] interface {
 	// RBroadcast blocks until the protocol is finished or an error occurred. The returned bool reflects this results
+	// If Stop is called, this method will return early without error.
 	RBroadcast(M) error
 	// Listen expects to receive a PROPOSE message at some point that will start the protocol. This method
 	// blocks until the protocol is finished or an error is returned.
+	// If Stop is called, this method will return early without error.
 	Listen() error
+	// Stop stops the RBC process. This simply means that the node will stop listening and the RBroadcast or
+	// Listen method called prior will return before the protocol finishes.
+	Stop() error
+}
+
+type NodeStoppedError struct{}
+
+func (err NodeStoppedError) Error() string {
+	return "node stopped"
+}
+func (err NodeStoppedError) Is(target error) bool {
+	_, ok := target.(NodeStoppedError)
+	return ok
 }

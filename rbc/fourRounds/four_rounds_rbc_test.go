@@ -26,21 +26,39 @@ type TestNode struct {
 
 // MockAuthStream mocks an authenticated message stream. Nothing is actually authenticated.
 type MockAuthStream struct {
-	Network networking.NetworkInterface[[]byte]
+	Network    networking.NetworkInterface[[]byte]
+	rcvChan    <-chan []byte
+	readDelay  time.Duration
+	writeDelay time.Duration
 }
 
-func NewMockAuthStream(iface networking.NetworkInterface[[]byte]) *MockAuthStream {
+func NewMockAuthStream(iface networking.NetworkInterface[[]byte], readDelay, writeDelay time.Duration) *MockAuthStream {
 	return &MockAuthStream{
-		Network: iface,
+		Network:    iface,
+		rcvChan:    make(chan []byte),
+		readDelay:  readDelay,
+		writeDelay: writeDelay,
+	}
+}
+
+func NoDelayMockAuthStream(iface networking.NetworkInterface[[]byte]) *MockAuthStream {
+	return &MockAuthStream{
+		Network:    iface,
+		rcvChan:    make(chan []byte),
+		readDelay:  0,
+		writeDelay: 0,
 	}
 }
 
 func (iface *MockAuthStream) Broadcast(bytes []byte) error {
+	// Artificially delay the broadcast
+	time.Sleep(iface.writeDelay)
 	return iface.Network.Broadcast(bytes)
 }
 
-func (iface *MockAuthStream) Receive() ([]byte, error) {
-	msg, err := iface.Network.Receive()
+func (iface *MockAuthStream) Receive(stop <-chan struct{}) ([]byte, error) {
+	msg, err := iface.Network.Receive(stop)
+	time.Sleep(iface.readDelay) // Artificially delay receiving
 	return msg, err
 }
 
@@ -55,7 +73,7 @@ func startDummyNode(stream *MockAuthStream) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		for {
-			_, _ = stream.Receive()
+			_, _ = stream.Receive(ctx.Done())
 			if ctx.Err() != nil {
 				return
 			}
@@ -149,7 +167,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 
 	// Set up a node to test
 	nIface := network.JoinNetwork()
-	stream := NewMockAuthStream(nIface)
+	stream := NoDelayMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
 	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
 	go func() {
@@ -164,7 +182,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
-		cancellers[i] = startDummyNode(NewMockAuthStream(iface))
+		cancellers[i] = startDummyNode(NoDelayMockAuthStream(iface))
 	}
 
 	// Send a PROPOSE message to the test node and check that it answers correctly
@@ -278,7 +296,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 
 	// Set up a node to test
 	nIface := network.JoinNetwork()
-	stream := NewMockAuthStream(nIface)
+	stream := NoDelayMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
 	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
 	go func() {
@@ -294,7 +312,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 		iface := network.JoinNetwork()
 		intefaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		cancellers[i] = startDummyNode(NewMockAuthStream(iface))
+		cancellers[i] = startDummyNode(NoDelayMockAuthStream(iface))
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -400,7 +418,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 
 	// Set up a node to test
 	nIface := network.JoinNetwork()
-	stream := NewMockAuthStream(nIface)
+	stream := NoDelayMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
 	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
 	go func() {
@@ -416,7 +434,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		cancellers[i] = startDummyNode(NewMockAuthStream(iface))
+		cancellers[i] = startDummyNode(NoDelayMockAuthStream(iface))
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -525,7 +543,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 
 	// Set up a node to test
 	nIface := network.JoinNetwork()
-	stream := NewMockAuthStream(nIface)
+	stream := NoDelayMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
 	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
 	go func() {
@@ -541,7 +559,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		cancellers[i] = startDummyNode(NewMockAuthStream(iface))
+		cancellers[i] = startDummyNode(NoDelayMockAuthStream(iface))
 	}
 
 	// Create a READY message
@@ -660,7 +678,7 @@ func runBroadcast(t *testing.T, nodes []*TestNode, nbNodes int, msg []kyber.Scal
 	wg.Wait()
 }
 
-// checkRBCResult checks that the state of the given node reflect a successfully completion of
+// checkRBCResult checks that the state of the given node reflect a successful completion of
 // an RBC algorithm given the reliably broadcast message msg. Doesn't return true of false but
 // makes the testing fail in case of a problem
 func checkRBCResult(t *testing.T, nodes []*TestNode, nbNodes int, msg []kyber.Scalar) {
@@ -681,7 +699,7 @@ func runAndCheckRBC(t *testing.T, nodes []*TestNode, nbNodes int, msg []kyber.Sc
 	checkRBCResult(t, nodes, nbNodes, msg)
 }
 
-// TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
+// TestFourRoundsRBC_Simple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
 // Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
 func TestFourRoundsRBC_Simple(t *testing.T) {
 	// Config
@@ -699,7 +717,7 @@ func TestFourRoundsRBC_Simple(t *testing.T) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		stream := NewMockAuthStream(network.JoinNetwork())
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
 		marshaller := &ScalarMarshaller{
 			Group: g,
 		}
@@ -732,7 +750,7 @@ func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
 	// Set up the working nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes-nbDead; i++ {
-		stream := NewMockAuthStream(network.JoinNetwork())
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
 		marshaller := &ScalarMarshaller{
 			Group: g,
 		}
@@ -746,7 +764,7 @@ func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := NewMockAuthStream(network.JoinNetwork())
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
 		deadNodes[i] = stream
 	}
 
@@ -774,7 +792,7 @@ func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
 	// Set up the working nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes-nbDead; i++ {
-		stream := NewMockAuthStream(network.JoinNetwork())
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
 		marshaller := &ScalarMarshaller{
 			Group: g,
 		}
@@ -788,7 +806,7 @@ func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := NewMockAuthStream(network.JoinNetwork())
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
 		deadNodes[i] = stream
 	}
 
@@ -817,7 +835,7 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 	// Set up the working nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes-nbDead; i++ {
-		stream := NewMockAuthStream(network.JoinNetwork())
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
 		marshaller := &ScalarMarshaller{
 			Group: g,
 		}
@@ -831,7 +849,7 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := NewMockAuthStream(network.JoinNetwork())
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
 		deadNodes[i] = stream
 	}
 
@@ -846,6 +864,86 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 
 	// Require the deadline to have exceeded
 	require.Equal(t, ctx.Err(), context.DeadlineExceeded)
+}
+
+// TestFourRoundsRBC_SlowNode creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
+// In this situation, 1 node is slow i.e. it has some delay when reading and writing to the network. The broadcast
+// should still work fine, only slowly.
+func TestFourRoundsRBC_SlowNode(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	nbSlow := 1
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		var stream *MockAuthStream
+		if i > nbNodes-nbSlow {
+			// Set up the slow nodes with half a second of delay when reading or writing
+			stream = NewMockAuthStream(network.JoinNetwork(), time.Millisecond*500, time.Millisecond*500)
+		} else {
+			// All other nodes don't have delay
+			stream = NoDelayMockAuthStream(network.JoinNetwork())
+		}
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Run and check RBC, it should work normally only slower
+	runAndCheckRBC(t, nodes, nbNodes, s)
+}
+
+// TestFourRoundsRBC_SlowNode creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
+// In this situation, 3 node are slow i.e. they have some delay when reading and writing to the network. The broadcast
+// should still work fine, only slowly.
+func TestFourRoundsRBC_SlowNodes(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	nbSlow := 3
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		var stream *MockAuthStream
+		if i > nbNodes-nbSlow {
+			// Set up the slow nodes with half a second of delay when reading or writing
+			stream = NewMockAuthStream(network.JoinNetwork(), time.Millisecond*500, time.Millisecond*500)
+		} else {
+			// All other nodes don't have delay
+			stream = NoDelayMockAuthStream(network.JoinNetwork())
+		}
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Run and check RBC, it should work normally only slower
+	runAndCheckRBC(t, nodes, nbNodes, s)
 }
 
 // TestFourRoundsRBC_DealAndDies creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
@@ -866,7 +964,7 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		stream := NewMockAuthStream(network.JoinNetwork())
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
 		marshaller := &ScalarMarshaller{
 			Group: g,
 		}
@@ -893,7 +991,7 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 
 	// Create a dying dealer. We don't need to actually create an RBC instance, we just need to send the PROPOSE
 	// from some node in the network and never answer after that
-	dyingDealer := NewMockAuthStream(network.JoinNetwork())
+	dyingDealer := NoDelayMockAuthStream(network.JoinNetwork())
 
 	// Start RBC from the dying dealer
 
@@ -918,4 +1016,322 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 
 	// Check that everything worked
 	checkRBCResult(t, nodes, nbNodes-1, s)
+}
+
+// TestFourRoundsRBC_testStop tests that calling the Stop method on a node after having called the broadcast
+// or listen function returns without error
+func TestFourRoundsRBC_testStop(t *testing.T) {
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	stream := NoDelayMockAuthStream(network.JoinNetwork())
+	marshaller := &ScalarMarshaller{
+		Group: g,
+	}
+	node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+		r, nbNodes, uint32(0)))
+
+	// Listen on the node in a go routine and expect it to cancel the context before the timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
+
+	go func() {
+		err := node.rbc.Listen()
+		// Listen should have returned an ErrClosed since the stop function should have been called
+		require.NoError(t, err)
+		// If this is reached, the Listen method is returned so cancel the ctx to notify
+		cancel()
+	}()
+
+	err := node.rbc.Stop()
+	require.NoError(t, err)
+
+	<-ctx.Done()
+	require.Equal(t, context.Canceled, ctx.Err())
+
+	// Similarly but with broadcast
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second*1)
+
+	go func() {
+		err := node.rbc.RBroadcast(s)
+		// Listen should have returned an ErrClosed since the stop function should have been called
+		require.NoError(t, err)
+		// If this is reached, the Listen method is returned so cancel the ctx to notify
+		cancel()
+	}()
+
+	err = node.rbc.Stop()
+	require.NoError(t, err)
+
+	<-ctx.Done()
+	require.Equal(t, context.Canceled, ctx.Err())
+}
+
+// TestFourRoundsRBC_DealAndStop works similarly to TestFourRoundsRBC_DealAndDies but instead the Stop function
+// is called on the dealer
+func TestFourRoundsRBC_DealAndStop(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		// Add a bit of delay when reading to leave time for the dealer node to be stopped
+		stream := NewMockAuthStream(network.JoinNetwork(), time.Millisecond*10, 0)
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Set all nodes to listen except from one which will be the dealer
+	wg := sync.WaitGroup{}
+	for i := 0; i < nbNodes-1; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := nodes[i].rbc.Listen()
+			if err != nil {
+				// Log
+				t.Logf("Error listening: %v", err)
+			}
+			t.Logf("Node %d done", i)
+		}()
+	}
+
+	dealer := nodes[nbNodes-1]
+
+	go func() {
+		// Start RBC from the dealer
+		err := dealer.rbc.RBroadcast(s)
+		require.NoError(t, err)
+		t.Log("Broadcast complete")
+
+	}()
+
+	// Stop the dealer
+	time.Sleep(time.Millisecond * 10)
+	err := dealer.rbc.Stop()
+	require.NoError(t, err)
+	t.Log("Dealer Stopped")
+
+	wg.Wait()
+
+	// Check that everything worked
+	checkRBCResult(t, nodes, nbNodes-1, s)
+
+	// Check the dealer did not finish
+	require.False(t, dealer.rbc.finished)
+}
+
+// TestFourRoundsRBC_ListenerDies works similarly to TestFourRoundsRBC_DealAndStop but instead a random node is
+// stopped and not the dealer
+func TestFourRoundsRBC_ListenerDies(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		// Add a bit of delay when reading to leave time for the dealer node to be stopped
+		stream := NewMockAuthStream(network.JoinNetwork(), time.Millisecond*10, 0)
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Set all nodes to listen except from one which will be the dealer and the one that will fail
+	wg := sync.WaitGroup{}
+	for i := 1; i < nbNodes-1; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := nodes[i].rbc.Listen()
+			if err != nil {
+				// Log
+				t.Logf("Error listening: %v", err)
+			}
+			t.Logf("Node %d done", i)
+		}()
+	}
+
+	// Start the failing node
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		failNode := nodes[nbNodes-1]
+		err := failNode.rbc.Listen()
+		require.NoError(t, err)
+		t.Log("Failing node finished")
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Start RBC from the dealer
+		err := nodes[0].rbc.RBroadcast(s)
+		require.NoError(t, err)
+		t.Log("Broadcast complete")
+	}()
+
+	// Wait  little bit
+	time.Sleep(time.Millisecond * 30)
+	// Stop the last node
+	err := nodes[nbNodes-1].rbc.Stop()
+	require.NoError(t, err)
+
+	wg.Wait()
+
+	// Check that everything worked
+	checkRBCResult(t, nodes, nbNodes-1, s)
+
+	// Check that the last node did not finish
+	require.False(t, nodes[nbNodes-1].rbc.finished)
+}
+
+// TestFourRoundsRBC_ListenerDies works similarly to TestFourRoundsRBC_DealAndStop but instead two random nodes are
+// stopped and not the dealer
+func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
+	nbFailing := 2
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		// Add a bit of delay when reading to leave time for the dealer node to be stopped
+		stream := NewMockAuthStream(network.JoinNetwork(), time.Millisecond*10, 0)
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Set all nodes to listen except from one which will be the dealer and the one that will fail
+	wg := sync.WaitGroup{}
+	for i := 1; i < nbNodes-nbFailing; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := nodes[i].rbc.Listen()
+			if err != nil {
+				// Log
+				t.Logf("Error listening: %v", err)
+			}
+			t.Logf("Node %d done", i)
+		}()
+	}
+
+	// Start the failing nodes
+	for i := 0; i < nbFailing; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			failNode := nodes[nbNodes-i-1]
+			err := failNode.rbc.Listen()
+			require.NoError(t, err)
+			t.Logf("Failing node %d finished", i)
+		}()
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Start RBC from the dealer
+		err := nodes[0].rbc.RBroadcast(s)
+		require.NoError(t, err)
+		t.Log("Broadcast complete")
+	}()
+
+	// Wait  little bit
+	// Stop the failing nodes
+	time.Sleep(time.Millisecond * 20)
+	for i := 0; i < nbFailing; i++ {
+		time.Sleep(time.Millisecond * 10)
+		err := nodes[nbNodes-i-1].rbc.Stop()
+		require.NoError(t, err)
+	}
+
+	wg.Wait()
+
+	// Check that everything worked
+	checkRBCResult(t, nodes, nbNodes-nbFailing, s)
+
+	// Check that the last node did not finish
+	for i := 0; i < nbFailing; i++ {
+		require.False(t, nodes[nbNodes-i-1].rbc.finished)
+	}
+}
+
+// TestFourRoundsRBC_Stress creates a network with a threshold t=20 and n=3*t+1 nodes and start a broadcast from one node.
+// Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
+func TestFourRoundsRBC_Stress(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork[[]byte]()
+
+	threshold := 20
+	r := 2
+	nbNodes := 3*threshold + 1
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		stream := NoDelayMockAuthStream(network.JoinWithBuffer(4000))
+		marshaller := &ScalarMarshaller{
+			Group: g,
+		}
+		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
+			r, nbNodes, uint32(i)))
+		nodes[i] = node
+	}
+
+	// Run RBC and check the result
+	runAndCheckRBC(t, nodes, nbNodes, s)
 }

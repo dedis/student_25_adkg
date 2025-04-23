@@ -197,15 +197,10 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 
 	err = interfaces[1].Send(proposeBytes, nIface.GetID())
 	require.NoError(t, err)
-	t.Logf("Send PROPOSE message to %d", nIface.GetID())
+	t.Logf("Sent PROPOSE message to %d", nIface.GetID())
 
 	// Wait a second for message to have been sent
-	time.Sleep(10 * time.Millisecond)
-
-	// Stop all listening networks
-	for _, canceller := range cancellers {
-		canceller()
-	}
+	time.Sleep(time.Second)
 
 	// Expect each interface to have received an echo message for each chunk
 	for i, iface := range interfaces {
@@ -278,6 +273,11 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	// Check that the bytes of the decoded message match the original message sent
 	for i := 0; i < threshold+1; i++ {
 		require.Equal(t, s[i], decoded[i])
+	}
+
+	// Stop all listening networks
+	for _, canceller := range cancellers {
+		canceller()
 	}
 }
 

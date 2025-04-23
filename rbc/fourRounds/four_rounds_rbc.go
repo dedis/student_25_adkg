@@ -3,6 +3,7 @@ package fourRounds
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/rs/zerolog"
 	"go.dedis.ch/kyber/v4"
@@ -55,6 +56,7 @@ type FourRoundRBC[M any] struct {
 	pred       func([]M) bool
 	hash.Hash
 	rs        *reedsolomon.RSCodes
+	stopChan  chan struct{}
 	threshold int
 	sentReady bool
 	sync.RWMutex
@@ -96,6 +98,7 @@ func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
 		pred:        pred,
 		Hash:        h,
 		rs:          reedsolomon.NewRSCodes(group),
+		stopChan:    make(chan struct{}),
 		threshold:   threshold,
 		sentReady:   false,
 		RWMutex:     sync.RWMutex{},
@@ -146,11 +149,17 @@ func (frRbc *FourRoundRBC[M]) broadcast(ms []M) error {
 func (frRbc *FourRoundRBC[M]) start(cancelFunc context.CancelFunc) {
 	go func() {
 		for {
-			bs, err := frRbc.iface.Receive()
+			bs, err := frRbc.iface.Receive(frRbc.stopChan)
 			if err != nil {
+				// Check if the error is that the receive was stop via the channel or not
+				if errors.Is(err, rbc.NodeStoppedError{}) {
+					// The channel was stopped so we just return
+					cancelFunc()
+					return
+				}
 				frRbc.log.Err(err).Msg("Error receiving message")
-				continue
 			}
+
 			msg := &typedefs.Instruction{}
 			err = proto.Unmarshal(bs, msg)
 			if err != nil {
@@ -191,6 +200,11 @@ func (frRbc *FourRoundRBC[M]) Listen() error {
 	frRbc.start(cancel)
 
 	<-ctx.Done()
+	return nil
+}
+
+func (frRbc *FourRoundRBC[M]) Stop() error {
+	frRbc.stopChan <- struct{}{}
 	return nil
 }
 
@@ -284,7 +298,6 @@ func (frRbc *FourRoundRBC[M]) receiveEcho(msg *typedefs.Message_Echo) error {
 		count += 1
 
 		// If the hash has received enough READY messages, then the threshold only needs be t+1
-		// TODO not sure if we don't have sync problems here. Check it
 		hashReady := frRbc.checkReadyThreshold(frRbc.readyCounts.GetOrDefault(string(msg.H), 0))
 
 		// Check if we received enough (taking into account if we already received enough ready messages for that hash

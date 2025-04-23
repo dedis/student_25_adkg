@@ -58,7 +58,7 @@ func pred(bool) bool {
 
 // TestBrachaSimple creates a network of 3 nodes with a threshold of 1 and then lets one node start dealing and waits
 // sometime for the algorithm to finish and then check all nodes finished and settles on the same value that was dealt
-func TestBrachaSimple(t *testing.T) {
+func TestBrachaRBC_Simple(t *testing.T) {
 	// Config
 	network := networking.NewFakeNetwork[[]byte]()
 	threshold := 1

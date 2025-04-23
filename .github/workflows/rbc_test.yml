@@ -40,26 +40,9 @@ jobs:
       - name: run RBC Bracha tests
         run: |
           set -euo pipefail
-          go test -json -v -race -run ./rbc/bracha 2>&1 | tee ./${{ github.run_attempt }}/rbctest-brac.log | gotestfmt
+          go test -json -v -race -run TestBrachaRBC ./rbc/bracha | gotestfmt
 
       - name: run RBC FourRounds tests
         run: |
           set -euo pipefail
-          go test -json -v -race -run ./rbc/fourRounds 2>&1 | tee ./${{ github.run_attempt }}/rbctest-four.log | gotestfmt
-      # Upload formatted logs
-      - name: Upload bracha test log
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-bracha-log
-          path: ./${{ github.run_attempt }}/rbctest-brac.log.log
-          if-no-files-found: error
-
-      - name: Upload 4Rounds test log
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-4rounds-log
-          path: ./${{ github.run_attempt }}/rbctest-four.log
-          if-no-files-found: error
-    
-      
-    
+          go test -json -v -race -run TestFourRoundsRBC ./rbc/fourRounds | gotestfmt

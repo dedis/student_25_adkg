@@ -38,11 +38,7 @@ jobs:
           mkdir -p ./${{ github.run_attempt }}
       
       - name: run RBC Bracha tests
-        run: |
-          set -euo pipefail
-          go test -json -v -race -run TestBrachaRBC ./rbc/bracha | gotestfmt
+        run: go test -json -v -race -run TestBrachaRBC ./rbc/bracha | gotestfmt
 
       - name: run RBC FourRounds tests
-        run: |
-          set -euo pipefail
-          go test -json -v -race -run TestFourRoundsRBC ./rbc/fourRounds | gotestfmt
+        run: go test -json -v -race -run TestFourRoundsRBC ./rbc/fourRounds | gotestfmt

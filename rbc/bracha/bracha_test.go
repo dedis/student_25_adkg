@@ -6,6 +6,7 @@ import (
 	"student_25_adkg/networking"
 	"sync"
 	"testing"
+	"time"
 )
 
 type TestNode struct {
@@ -15,41 +16,42 @@ type TestNode struct {
 	stop  bool
 }
 
+// MockAuthStream mocks an authenticated message stream. Nothing is actually authenticated.
 type MockAuthStream struct {
-	Network  networking.NetworkInterface[[]byte]
-	handlers []*func([]byte) error
+	Network    networking.NetworkInterface[[]byte]
+	rcvChan    <-chan []byte
+	readDelay  time.Duration
+	writeDelay time.Duration
 }
 
-func NewMockAuthStream(iface networking.NetworkInterface[[]byte]) *MockAuthStream {
+func NewMockAuthStream(iface networking.NetworkInterface[[]byte], readDelay, writeDelay time.Duration) *MockAuthStream {
 	return &MockAuthStream{
-		Network: iface,
+		Network:    iface,
+		rcvChan:    make(chan []byte),
+		readDelay:  readDelay,
+		writeDelay: writeDelay,
+	}
+}
+
+func NoDelayMockAuthStream(iface networking.NetworkInterface[[]byte]) *MockAuthStream {
+	return &MockAuthStream{
+		Network:    iface,
+		rcvChan:    make(chan []byte),
+		readDelay:  0,
+		writeDelay: 0,
 	}
 }
 
 func (iface *MockAuthStream) Broadcast(bytes []byte) error {
+	// Artificially delay the broadcast
+	time.Sleep(iface.writeDelay)
 	return iface.Network.Broadcast(bytes)
 }
 
-func (iface *MockAuthStream) AddHandler(handler func([]byte) error) {
-	iface.handlers = append(iface.handlers, &handler)
-}
-
-func (iface *MockAuthStream) Start() {
-	go func() {
-		for {
-			msg, err := iface.Network.Receive()
-			if err != nil {
-				// Probably log
-			}
-
-			for _, handler := range iface.handlers {
-				err = (*handler)(msg)
-				if err != nil {
-					// Probably log
-				}
-			}
-		}
-	}()
+func (iface *MockAuthStream) Receive(stop <-chan struct{}) ([]byte, error) {
+	msg, err := iface.Network.Receive(stop)
+	time.Sleep(iface.readDelay) // Artificially delay receiving
+	return msg, err
 }
 
 func NewTestNode(iface *MockAuthStream, rbc *BrachaRBC) *TestNode {
@@ -75,10 +77,9 @@ func TestBrachaSimple(t *testing.T) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		stream := NewMockAuthStream(network.JoinNetwork())
-		node := NewTestNode(stream, NewBrachaRBC(pred, threshold, stream))
+		stream := NoDelayMockAuthStream(network.JoinNetwork())
+		node := NewTestNode(stream, NewBrachaRBC(pred, threshold, stream, uint32(i)))
 		nodes[i] = node
-		stream.Start()
 	}
 
 	// Create a wait group to wait for all bracha instances to finish

@@ -887,7 +887,7 @@ func TestFourRoundsRBC_SlowNode(t *testing.T) {
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		var stream *MockAuthStream
-		if i > nbNodes-nbSlow {
+		if i >= nbNodes-nbSlow {
 			// Set up the slow nodes with half a second of delay when reading or writing
 			stream = NewMockAuthStream(network.JoinNetwork(), time.Millisecond*500, time.Millisecond*500)
 		} else {

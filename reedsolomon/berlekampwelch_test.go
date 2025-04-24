@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func checkEncoding(t *testing.T, encoded []infectious.Share, expected []byte, decoder RSDecoder) {
+func checkEncoding(t *testing.T, encoded []Encoding, expected []byte, decoder RSDecoder) {
 	// Decode the message
 	decoded, err := decoder.Decode(encoded)
 	require.NoError(t, err)
@@ -21,9 +21,9 @@ func checkEncoding(t *testing.T, encoded []infectious.Share, expected []byte, de
 	}
 }
 
-// TestRSCode_Simple tests that encoding and decoding a message without any errors in the message to decode
+// TestBWCodes_Simple tests that encoding and decoding a message without any errors in the message to decode
 // works.
-func TestRSCode_Simple(t *testing.T) {
+func TestBWCodes_Simple(t *testing.T) {
 	k := 3
 	n := 7
 	rsCodes := NewBWCodes(k, n)
@@ -41,9 +41,9 @@ func TestRSCode_Simple(t *testing.T) {
 	checkEncoding(t, encoded, message, rsCodes)
 }
 
-// TestRSCode_Corrupted tests that encoding and decoding a message where some
+// TestBWCodes_Corrupted tests that encoding and decoding a message where some
 // data corrupted still works
-func TestRSCode_Corrupted(t *testing.T) {
+func TestBWCodes_Corrupted(t *testing.T) {
 	k := 3
 	n := 7
 	rsCodes := NewBWCodes(k, n)
@@ -60,29 +60,29 @@ func TestRSCode_Corrupted(t *testing.T) {
 	require.NoError(t, err)
 
 	// Alter some data
-	encoded[1].Data[0] = byte('s')
-	encoded[1].Data[1] = byte('e')
-	encoded[0].Data[0] = byte('x')
-	encoded[0].Data[1] = byte('y')
+	encoded[1].Val[0] = byte('s')
+	encoded[1].Val[1] = byte('e')
+	encoded[0].Val[0] = byte('x')
+	encoded[0].Val[1] = byte('y')
 
 	// Check the encoding
 	checkEncoding(t, encoded, message, rsCodes)
 
 	// Add additional corruption and check that it fails (the call to decode fixed the "encoded" array)
-	encoded[1].Data[0] = byte('s')
-	encoded[1].Data[1] = byte('e')
-	encoded[0].Data[0] = byte('x')
-	encoded[0].Data[1] = byte('y')
-	encoded[2].Data[0] = byte('!')
+	encoded[1].Val[0] = byte('s')
+	encoded[1].Val[1] = byte('e')
+	encoded[0].Val[0] = byte('x')
+	encoded[0].Val[1] = byte('y')
+	encoded[2].Val[0] = byte('!')
 
 	// Decode the message
 	_, err = rsCodes.Decode(encoded)
 	require.Equal(t, infectious.TooManyErrors, err)
 }
 
-// TestRSCode_Erasure tests that encoding and decoding a message where some
+// TestBWCodes_Erasure tests that encoding and decoding a message where some
 // data got erased
-func TestRSCode_Erasure(t *testing.T) {
+func TestBWCodes_Erasure(t *testing.T) {
 	k := 3
 	n := 7
 	rsCodes := NewBWCodes(k, n)

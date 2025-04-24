@@ -93,14 +93,12 @@ func (b *BrachaRBC) sendMsg(msg *BrachaMessage) error {
 	return err
 }
 
-func (b *BrachaRBC) start(cancel context.CancelFunc) {
+func (b *BrachaRBC) start(ctx context.Context, finishedChan chan struct{}) {
 	go func() {
 		for {
-			bs, err := b.iface.Receive(b.stopChan)
+			bs, err := b.iface.Receive(ctx)
 			if err != nil {
-				if errors.Is(err, rbc.NodeStoppedError{}) {
-					// If the "receive" method was cancelled, stop listening
-					cancel()
+				if errors.Is(err, context.Canceled) {
 					return
 				}
 				b.logger.Error().Err(err).Msg("error receiving message")
@@ -120,42 +118,35 @@ func (b *BrachaRBC) start(cancel context.CancelFunc) {
 			if finished {
 				b.finished = true
 				b.value = msg.Content
-				cancel()
+				close(finishedChan)
 			}
 		}
 	}()
 }
 
 // RBroadcast implements the method from the RBC interface
-func (b *BrachaRBC) RBroadcast(content bool) error {
-	// Register a handler for messages received from that stream
-	ctx, cancel := context.WithCancel(context.Background())
-	// Start
-	b.start(cancel)
+func (b *BrachaRBC) RBroadcast(ctx context.Context, content bool) error {
+	finishedChan := make(chan struct{})
+	b.start(ctx, finishedChan)
 
 	err := b.startBroadcast(content)
 	if err != nil {
 		return err
 	}
 
-	// Now the handler registered above will take over the control flow, and we just need to wait for the context
-	<-ctx.Done()
+	// Wait for the protocol to finish
+	<-finishedChan
 
 	return nil
 }
 
-func (b *BrachaRBC) Listen() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	b.start(cancel)
+func (b *BrachaRBC) Listen(ctx context.Context) error {
+	finishedChan := make(chan struct{})
+	b.start(ctx, finishedChan)
 
-	// Now the handler registered above will take over the control flow, and we just need to wait for the context
-	<-ctx.Done()
+	// Wait for the protocol to finish
+	<-finishedChan
 
-	return nil
-}
-
-func (b *BrachaRBC) Stop() error {
-	b.stopChan <- struct{}{}
 	return nil
 }
 

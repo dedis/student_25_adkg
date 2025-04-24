@@ -4,8 +4,6 @@ import (
 	"errors"
 )
 
-type InstanceID uint64
-
 type AuthenticatedMessageBroadcaster interface {
 	// Broadcast sends the given byte message to all nodes in the network.
 	Broadcast([]byte) error
@@ -26,11 +24,11 @@ type AuthenticatedMessageStream interface {
 	AuthenticatedMessageReceiver
 }
 
-// RBC is an interface for an RBC protocol. M represents the type of the value that the protocol broadcasts
-type RBC[M any] interface {
+// RBC is an interface for an RBC protocol
+type RBC interface {
 	// RBroadcast blocks until the protocol is finished or an error occurred. The returned bool reflects this results
 	// If Stop is called, this method will return early without error.
-	RBroadcast(M) error
+	RBroadcast([]byte) error
 	// Listen expects to receive a PROPOSE message at some point that will start the protocol. This method
 	// blocks until the protocol is finished or an error is returned.
 	// If Stop is called, this method will return early without error.

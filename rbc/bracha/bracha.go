@@ -37,7 +37,6 @@ var (
 
 // BrachaRBC implements RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
 type BrachaRBC struct {
-	rbc.RBC[bool]
 	iface      rbc.AuthenticatedMessageStream
 	pred       func(bool) bool
 	stopChan   chan struct{}

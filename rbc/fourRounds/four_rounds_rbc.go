@@ -5,9 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/HACKERALERT/infectious"
 	"github.com/rs/zerolog"
-	"go.dedis.ch/kyber/v4"
 	"golang.org/x/xerrors"
 	"google.golang.org/protobuf/proto"
 	"hash"
@@ -42,17 +40,9 @@ var (
 	}
 )
 
-// Marshaller represents an interface for an object that can marshal
-// and unmarshal some value type
-type Marshaller[M any] interface {
-	Marshal([]M) ([]byte, error)
-	Unmarshal([]byte) ([]M, error)
-}
-
-type FourRoundRBC[M any] struct {
-	iface      rbc.AuthenticatedMessageStream
-	marshaller Marshaller[M]
-	pred       func([]M) bool
+type FourRoundRBC struct {
+	iface rbc.AuthenticatedMessageStream
+	pred  func([]byte) bool
 	hash.Hash
 	rs        reedsolomon.RSCodes
 	stopChan  chan struct{}
@@ -62,19 +52,17 @@ type FourRoundRBC[M any] struct {
 	echoCount   map[string]int
 	readyCounts map[string]int
 	readyMis    map[string]map[string]struct{}
-	th          []infectious.Share
-	kyber.Group
-	r          int
-	nbNodes    int
-	finalValue []M
-	finished   bool
-	log        zerolog.Logger
-	id         uint32
+	th          []reedsolomon.Encoding
+	r           int
+	finalValue  []byte
+	finished    bool
+	log         zerolog.Logger
+	id          uint32
 }
 
-func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
+func NewFourRoundRBC(pred func([]byte) bool, h hash.Hash, threshold int,
 	iface rbc.AuthenticatedMessageStream,
-	marshaller Marshaller[M], group kyber.Group, r, nbNodes, mLen int, id uint32) *FourRoundRBC[M] {
+	rs reedsolomon.RSCodes, r int, id uint32) *FourRoundRBC {
 
 	// Disable logging based on the GLOG environment variable
 	var logLevel zerolog.Level
@@ -91,12 +79,11 @@ func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
 		Str("id", strconv.Itoa(int(id))).
 		Logger()
 
-	return &FourRoundRBC[M]{
+	return &FourRoundRBC{
 		iface:       iface,
-		marshaller:  marshaller,
 		pred:        pred,
 		Hash:        h,
-		rs:          reedsolomon.NewBWCodes(mLen, nbNodes),
+		rs:          rs,
 		stopChan:    make(chan struct{}),
 		threshold:   threshold,
 		sentReady:   false,
@@ -104,10 +91,8 @@ func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
 		echoCount:   make(map[string]int),
 		readyCounts: make(map[string]int),
 		readyMis:    make(map[string]map[string]struct{}),
-		th:          make([]infectious.Share, 0),
-		Group:       group,
+		th:          make([]reedsolomon.Encoding, 0),
 		r:           r,
-		nbNodes:     nbNodes,
 		finalValue:  nil,
 		finished:    false,
 		log:         logger,
@@ -115,17 +100,11 @@ func NewFourRoundRBC[M any](pred func([]M) bool, h hash.Hash, threshold int,
 	}
 }
 
-func (f *FourRoundRBC[M]) FreshHash(ms []M) ([]byte, error) {
+func (f *FourRoundRBC) FreshHash(bs []byte) ([]byte, error) {
 	f.Hash.Reset()
 
-	// Marshall the list of value
-	bs, err := f.marshaller.Marshal(ms)
-	if err != nil {
-		return nil, err
-	}
-
 	// Write the bytes
-	_, err = f.Hash.Write(bs)
+	_, err := f.Hash.Write(bs)
 	if err != nil {
 		return nil, err
 	}
@@ -133,14 +112,13 @@ func (f *FourRoundRBC[M]) FreshHash(ms []M) ([]byte, error) {
 	return h, nil
 }
 
-func (f *FourRoundRBC[M]) broadcast(ms []M) error {
-	msBytes, err := f.marshaller.Marshal(ms)
-	inst := createProposeMessage(msBytes)
-	err = f.broadcastInstruction(inst)
+func (f *FourRoundRBC) broadcast(bs []byte) error {
+	inst := createProposeMessage(bs)
+	err := f.broadcastInstruction(inst)
 	return err
 }
 
-func (f *FourRoundRBC[M]) start(cancelFunc context.CancelFunc) {
+func (f *FourRoundRBC) start(cancelFunc context.CancelFunc) {
 	go func() {
 		for {
 			bs, err := f.iface.Receive(f.stopChan)
@@ -175,7 +153,7 @@ func (f *FourRoundRBC[M]) start(cancelFunc context.CancelFunc) {
 	}()
 }
 
-func (f *FourRoundRBC[M]) RBroadcast(m []M) error {
+func (f *FourRoundRBC) RBroadcast(m []byte) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	f.start(cancel)
 
@@ -190,7 +168,7 @@ func (f *FourRoundRBC[M]) RBroadcast(m []M) error {
 	return nil
 }
 
-func (f *FourRoundRBC[M]) Listen() error {
+func (f *FourRoundRBC) Listen() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	f.start(cancel)
 
@@ -198,12 +176,12 @@ func (f *FourRoundRBC[M]) Listen() error {
 	return nil
 }
 
-func (f *FourRoundRBC[M]) Stop() error {
+func (f *FourRoundRBC) Stop() error {
 	f.stopChan <- struct{}{}
 	return nil
 }
 
-func (f *FourRoundRBC[M]) handleMessage(instruction *typedefs.Instruction) (error, bool) {
+func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (error, bool) {
 	var err error = nil
 	finished := false
 	switch op := instruction.GetOperation().GetOp().(type) {
@@ -215,22 +193,21 @@ func (f *FourRoundRBC[M]) handleMessage(instruction *typedefs.Instruction) (erro
 		err = f.receiveEcho(op.EchoInst)
 	case *typedefs.Message_ReadyInst:
 		f.log.Info().Msg("Received ready message")
-		finished = f.receiveReady(op.ReadyInst)
+		finished, err = f.receiveReady(op.ReadyInst)
 	default:
-		return xerrors.New("Invalid operation"), false
+		err = xerrors.New("Invalid operation")
 	}
 
 	return err, finished
 }
 
-func (f *FourRoundRBC[M]) receivePropose(m *typedefs.Message_Propose) error {
-	vals, err := f.marshaller.Unmarshal(m.Content)
-	if !f.pred(vals) {
+func (f *FourRoundRBC) receivePropose(m *typedefs.Message_Propose) error {
+	if !f.pred(m.Content) {
 		return xerrors.New("Given value did not pass the predicate")
 	}
 
 	// Hash the value
-	h, err := f.FreshHash(vals)
+	h, err := f.FreshHash(m.Content)
 	if err != nil {
 		return err
 	}
@@ -240,7 +217,7 @@ func (f *FourRoundRBC[M]) receivePropose(m *typedefs.Message_Propose) error {
 
 	// Broadcast an echo message for each encoding
 	for _, Mi := range encodings {
-		echoInst := createEchoMessage(Mi.Data, h, uint32(Mi.Number))
+		echoInst := createEchoMessage(Mi.Val, h, uint32(Mi.Idx))
 		err = f.broadcastInstruction(echoInst)
 		if err != nil {
 			return err
@@ -250,7 +227,7 @@ func (f *FourRoundRBC[M]) receivePropose(m *typedefs.Message_Propose) error {
 	return nil
 }
 
-func (f *FourRoundRBC[M]) receiveEcho(msg *typedefs.Message_Echo) error {
+func (f *FourRoundRBC) receiveEcho(msg *typedefs.Message_Echo) error {
 	f.Lock()
 	defer f.Unlock()
 
@@ -295,11 +272,11 @@ func (f *FourRoundRBC[M]) receiveEcho(msg *typedefs.Message_Echo) error {
 	return nil
 }
 
-func (f *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
+func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 	f.Lock()
 	defer f.Unlock()
 
-	// Update the count of ready message received for that hash and check if a READY message needs to be sent
+	// Update the count of ready messages received for that hash and check if a READY message needs to be sent
 	count, ok := f.readyCounts[string(msg.H)]
 	if !ok {
 		count = 0
@@ -319,13 +296,13 @@ func (f *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
 		err := f.broadcastInstruction(inst)
 		if err != nil {
 			f.log.Err(err).Msg("Failed to broadcast ready message")
-			return false
+			return false, err
 		}
 		f.sentReady = true
 		f.log.Printf("Sent Ready message for %x", msg.Mi)
 	}
 
-	var value []M = nil
+	var value []byte = nil
 	hashMis, ok := f.readyMis[string(msg.H)]
 
 	if !ok {
@@ -340,17 +317,13 @@ func (f *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
 	f.readyMis[string(msg.H)] = hashMis
 
 	finished := false
+	var err error
 	// If this value is seen for the first time, add it to T_h and try to reconstruct
 	if firstTime {
-		MiScalar := f.Scalar()
-		err := MiScalar.UnmarshalBinary(msg.Mi)
-		if err != nil {
-			return false
-		}
 		f.log.Printf("Received first ready message for %x", msg.Mi)
-		f.th = append(f.th, infectious.Share{
-			Data:   msg.Mi,
-			Number: int(msg.I),
+		f.th = append(f.th, reedsolomon.Encoding{
+			Val: msg.Mi,
+			Idx: int(msg.I),
 		})
 		f.log.Printf("Got %d messges in th", len(f.th))
 		// Try to reconstruct
@@ -364,13 +337,13 @@ func (f *FourRoundRBC[M]) receiveReady(msg *typedefs.Message_Ready) bool {
 	if finished {
 		f.finalValue = value
 		f.finished = true
-		return true
+		return true, nil
 	}
 
-	return false
+	return false, nil
 }
 
-func (f *FourRoundRBC[M]) reconstruct(expHash []byte) ([]M, bool, error) {
+func (f *FourRoundRBC) reconstruct(expHash []byte) ([]byte, bool, error) {
 	for ri := 0; ri < f.r; ri++ {
 		if len(f.th) < 2*f.threshold+ri+1 {
 			// If it is not the case now, it won't be in the next iteration since r increases
@@ -382,21 +355,19 @@ func (f *FourRoundRBC[M]) reconstruct(expHash []byte) ([]M, bool, error) {
 			return nil, false, err
 		}
 
-		coefficientsMarshalled, err := f.marshaller.Unmarshal(coefficients)
-		h, err := f.FreshHash(coefficientsMarshalled)
+		h, err := f.FreshHash(coefficients)
 		if err != nil {
 			return nil, false, err
 		}
 
 		if bytes.Equal(h, expHash) {
-			return coefficientsMarshalled, true, nil
-
+			return coefficients, true, nil
 		}
 	}
 	return nil, false, nil
 }
 
-func (f *FourRoundRBC[M]) broadcastInstruction(instruction *typedefs.Instruction) error {
+func (f *FourRoundRBC) broadcastInstruction(instruction *typedefs.Instruction) error {
 	out, err := proto.Marshal(instruction)
 	if err != nil {
 		return err
@@ -436,13 +407,13 @@ func createProposeMessage(ms []byte) *typedefs.Instruction {
 	return inst
 }
 
-func (f *FourRoundRBC[M]) checkEchoThreshold(count int, hashReady bool) bool {
+func (f *FourRoundRBC) checkEchoThreshold(count int, hashReady bool) bool {
 	if hashReady {
 		return count >= (f.threshold + 1)
 	}
 	return count >= (2*f.threshold + 1)
 }
 
-func (f *FourRoundRBC[M]) checkReadyThreshold(count int) bool {
+func (f *FourRoundRBC) checkReadyThreshold(count int) bool {
 	return count >= (f.threshold + 1)
 }

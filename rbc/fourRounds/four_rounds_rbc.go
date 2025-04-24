@@ -45,7 +45,6 @@ type FourRoundRBC struct {
 	pred  func([]byte) bool
 	hash.Hash
 	rs        reedsolomon.RSCodes
-	stopChan  chan struct{}
 	threshold int
 	sentReady bool
 	sync.RWMutex
@@ -185,7 +184,7 @@ func (f *FourRoundRBC) Listen(ctx context.Context) error {
 }
 
 func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (error, bool) {
-	var err error = nil
+	var err error
 	finished := false
 	switch op := instruction.GetOperation().GetOp().(type) {
 	case *typedefs.Message_ProposeInst:
@@ -217,6 +216,9 @@ func (f *FourRoundRBC) receivePropose(m *typedefs.Message_Propose) error {
 
 	// Encode to have a share to send for each node
 	encodings, err := f.rs.Encode(m.Content)
+	if err != nil {
+		return err
+	}
 
 	// Broadcast an echo message for each encoding
 	for _, Mi := range encodings {

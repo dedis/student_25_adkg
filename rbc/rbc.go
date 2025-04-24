@@ -1,6 +1,7 @@
 package rbc
 
 import (
+	"context"
 	"errors"
 )
 
@@ -12,7 +13,7 @@ type AuthenticatedMessageBroadcaster interface {
 type AuthenticatedMessageReceiver interface {
 	// Receive blocks until a message is received and returns this message or an error or the given channel
 	// is return to. The channel is used to stop waiting for a message.
-	Receive(<-chan struct{}) ([]byte, error)
+	Receive(context.Context) ([]byte, error)
 }
 
 // AuthenticatedMessageStream is an interface provided by the node to allow secure communication
@@ -25,17 +26,14 @@ type AuthenticatedMessageStream interface {
 }
 
 // RBC is an interface for an RBC protocol
-type RBC interface {
+type RBC[T any] interface {
 	// RBroadcast blocks until the protocol is finished or an error occurred. The returned bool reflects this results
 	// If Stop is called, this method will return early without error.
-	RBroadcast([]byte) error
+	RBroadcast(context.Context, T) error
 	// Listen expects to receive a PROPOSE message at some point that will start the protocol. This method
 	// blocks until the protocol is finished or an error is returned.
 	// If Stop is called, this method will return early without error.
-	Listen() error
-	// Stop stops the RBC process. This simply means that the node will stop listening and the RBroadcast or
-	// Listen method called prior will return before the protocol finishes.
-	Stop() error
+	Listen(ctx context.Context) error
 }
 
 // NodeStoppedError is used when the Listen or RBroadcast methods are stopped via

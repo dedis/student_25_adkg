@@ -3,7 +3,6 @@ package bracha
 import (
 	"context"
 	"github.com/stretchr/testify/require"
-	"go.dedis.ch/kyber/v4"
 	"student_25_adkg/networking"
 	"sync"
 	"testing"
@@ -11,10 +10,8 @@ import (
 )
 
 type TestNode struct {
-	g     kyber.Group
 	iface *MockAuthStream
 	rbc   *BrachaRBC
-	stop  bool
 }
 
 // MockAuthStream mocks an authenticated message stream. Nothing is actually authenticated.

@@ -84,7 +84,6 @@ func NewFourRoundRBC(pred func([]byte) bool, h hash.Hash, threshold int,
 		pred:        pred,
 		Hash:        h,
 		rs:          rs,
-		stopChan:    make(chan struct{}),
 		threshold:   threshold,
 		sentReady:   false,
 		RWMutex:     sync.RWMutex{},
@@ -118,15 +117,15 @@ func (f *FourRoundRBC) broadcast(bs []byte) error {
 	return err
 }
 
-func (f *FourRoundRBC) start(cancelFunc context.CancelFunc) {
+func (f *FourRoundRBC) start(ctx context.Context, success, stopped chan struct{}) {
 	go func() {
 		for {
-			bs, err := f.iface.Receive(f.stopChan)
+			bs, err := f.iface.Receive(ctx)
 			if err != nil {
 				// Check if the error is that the "receive" was stop via the channel or not
-				if errors.Is(err, rbc.NodeStoppedError{}) {
+				if errors.Is(err, context.Canceled) {
 					// The channel was stopped so we just return
-					cancelFunc()
+					close(stopped)
 					return
 				}
 				f.log.Err(err).Msg("Error receiving message")
@@ -146,39 +145,43 @@ func (f *FourRoundRBC) start(cancelFunc context.CancelFunc) {
 			}
 			if finished {
 				f.log.Err(err).Msg("Protocol terminated")
-				cancelFunc()
+				close(success)
 				return
 			}
 		}
 	}()
 }
 
-func (f *FourRoundRBC) RBroadcast(m []byte) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	f.start(cancel)
+func (f *FourRoundRBC) RBroadcast(ctx context.Context, m []byte) error {
+	successChan := make(chan struct{})
+	stoppedChan := make(chan struct{})
+	f.start(ctx, successChan, stoppedChan)
 
 	// Send the broadcast
 	err := f.broadcast(m)
 	if err != nil {
-		cancel()
 		return err
 	}
 
-	<-ctx.Done()
-	return nil
+	select {
+	case <-successChan:
+		return nil
+	case <-stoppedChan:
+		return context.Canceled
+	}
 }
 
-func (f *FourRoundRBC) Listen() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	f.start(cancel)
+func (f *FourRoundRBC) Listen(ctx context.Context) error {
+	successChan := make(chan struct{})
+	stoppedChan := make(chan struct{})
+	f.start(ctx, successChan, stoppedChan)
 
-	<-ctx.Done()
-	return nil
-}
-
-func (f *FourRoundRBC) Stop() error {
-	f.stopChan <- struct{}{}
-	return nil
+	select {
+	case <-successChan:
+		return nil
+	case <-stoppedChan:
+		return context.Canceled
+	}
 }
 
 func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (error, bool) {

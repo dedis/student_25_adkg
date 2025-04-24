@@ -1,5 +1,9 @@
 package rbc
 
+import (
+	"errors"
+)
+
 type InstanceID uint64
 
 type AuthenticatedMessageBroadcaster interface {
@@ -36,12 +40,15 @@ type RBC[M any] interface {
 	Stop() error
 }
 
+// NodeStoppedError is used when the Listen or RBroadcast methods are stopped via
+// the Stop method.
 type NodeStoppedError struct{}
 
 func (err NodeStoppedError) Error() string {
 	return "node stopped"
 }
 func (err NodeStoppedError) Is(target error) bool {
-	_, ok := target.(NodeStoppedError)
+	var nodeStoppedError NodeStoppedError
+	ok := errors.As(target, &nodeStoppedError)
 	return ok
 }

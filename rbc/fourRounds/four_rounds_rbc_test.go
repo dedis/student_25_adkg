@@ -16,7 +16,6 @@ import (
 )
 
 type TestNode struct {
-	id    uint32
 	iface *MockAuthStream
 	rbc   *FourRoundRBC
 	networking.NetworkInterface[[]byte]
@@ -961,18 +960,18 @@ func TestFourRoundsRBC_testStop(t *testing.T) {
 
 	// Similarly but with broadcast
 
-	ctx, cancel = context.WithTimeout(context.Background(), time.Second*1)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second*1)
 
 	go func() {
-		err := node.rbc.RBroadcast(ctx, s)
+		err := node.rbc.RBroadcast(ctx2, s)
 		// Listen should have returned an ErrClosed since the stop function should have been called
 		require.Error(t, context.Canceled, err)
 		// If this is reached, the Listen method is returned so cancel the ctx to notify
 	}()
-	cancel()
+	cancel2()
 
-	<-ctx.Done()
-	require.Equal(t, context.Canceled, ctx.Err())
+	<-ctx2.Done()
+	require.Equal(t, context.Canceled, ctx2.Err())
 }
 
 // TestFourRoundsRBC_DealAndStop works similarly to TestFourRoundsRBC_DealAndDies but instead the Stop function

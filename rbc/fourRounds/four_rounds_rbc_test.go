@@ -5,10 +5,10 @@ import (
 	"context"
 	"crypto/cipher"
 	"crypto/sha256"
+	"github.com/HACKERALERT/infectious"
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/group/edwards25519"
-	"go.dedis.ch/kyber/v4/share"
 	"google.golang.org/protobuf/proto"
 	"student_25_adkg/networking"
 	"student_25_adkg/rbc/fourRounds/typedefs"
@@ -91,14 +91,31 @@ type ScalarMarshaller struct {
 	kyber.Group
 }
 
-func (sm *ScalarMarshaller) Marshal(s kyber.Scalar) ([]byte, error) {
-	b, err := s.MarshalBinary()
-	return b, err
+func (sm *ScalarMarshaller) Marshal(scalars []kyber.Scalar) ([]byte, error) {
+	bs := make([]byte, 0)
+	for _, scalar := range scalars {
+		b, err := scalar.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		bs = append(bs, b...)
+	}
+	return bs, nil
 }
-func (sm *ScalarMarshaller) Unmarshal(b []byte) (kyber.Scalar, error) {
-	s := sm.Group.Scalar().Zero()
-	err := s.UnmarshalBinary(b)
-	return s, err
+func (sm *ScalarMarshaller) Unmarshal(b []byte) ([]kyber.Scalar, error) {
+	sSize := sm.Group.Scalar().MarshalSize()
+	k := len(b) / sSize
+	scalars := make([]kyber.Scalar, k)
+	for i := 0; i < k; i++ {
+		bs := b[i*sSize : (i+1)*sSize]
+		scalar := sm.Group.Scalar()
+		err := scalar.UnmarshalBinary(bs)
+		if err != nil {
+			return nil, err
+		}
+		scalars[i] = scalar
+	}
+	return scalars, nil
 }
 
 func TestFreshHash(t *testing.T) {
@@ -114,7 +131,7 @@ func TestFreshHash(t *testing.T) {
 	marshaller := &ScalarMarshaller{
 		Group: g,
 	}
-	node := NewTestNode(nil, NewFourRoundRBC(pred, sha256.New(), 0, nil, marshaller, g, 0, 0, 0))
+	node := NewTestNode(nil, NewFourRoundRBC(pred, sha256.New(), 0, nil, marshaller, g, 0, mLen, mLen, 0))
 
 	h1, err := node.rbc.FreshHash(s)
 	require.NoError(t, err)
@@ -139,17 +156,10 @@ func generateMessage(l int, g kyber.Group, randomStream cipher.Stream) []kyber.S
 	return s
 }
 
-func marshallMessage(msg []kyber.Scalar, group kyber.Group) [][]byte {
+func marshallMessage(msg []kyber.Scalar, group kyber.Group) ([]byte, error) {
 	marshaller := getMarshaller(group)
-	ms := make([][]byte, len(msg))
-	for i := 0; i < len(msg); i++ {
-		m, err := marshaller.Marshal(msg[i])
-		if err != nil {
-			panic(err)
-		}
-		ms[i] = m
-	}
-	return ms
+	ms, err := marshaller.Marshal(msg)
+	return ms, err
 }
 
 // TestFourRoundsRBC_Receive_Propose tests that a node correctly handles the reception of a PROPOSE message
@@ -169,7 +179,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	nIface := network.JoinNetwork()
 	stream := NoDelayMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
-	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
+	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, mLen, nIface.GetID()))
 	go func() {
 		err := node.rbc.Listen()
 		require.NoError(t, err)
@@ -189,7 +199,9 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	s := generateMessage(mLen, g, g.RandomStream())
 	sHash, err := node.rbc.FreshHash(s)
 	require.NoError(t, err)
-	proposeMessage := createProposeMessage(marshallMessage(s, g))
+	bs, err := marshallMessage(s, g)
+	require.NoError(t, err)
+	proposeMessage := createProposeMessage(bs)
 	proposeBytes, err := proto.Marshal(proposeMessage)
 	if err != nil {
 		panic(err)
@@ -247,7 +259,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 
 	// Try to reconstruct from the encoded messages
 	messages := interfaces[0].GetReceived()
-	chunks := make([]*share.PriShare, nbNodes)
+	chunks := make([]infectious.Share, nbNodes)
 	for i := 0; i < len(messages); i++ {
 		bs := messages[i]
 		msg := &typedefs.Instruction{}
@@ -255,11 +267,9 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 		require.NoError(t, err)
 		switch op := msg.Operation.Op.(type) {
 		case *typedefs.Message_EchoInst:
-			chunk, err := marshaller.Unmarshal(op.EchoInst.Mi)
-			require.NoError(t, err)
-			chunks[op.EchoInst.I] = &share.PriShare{
-				I: op.EchoInst.I,
-				V: chunk,
+			chunks[op.EchoInst.I] = infectious.Share{
+				Number: int(op.EchoInst.I),
+				Data:   op.EchoInst.Mi,
 			}
 		default:
 			require.Fail(t, "Unexpected message type: %T", msg)
@@ -267,12 +277,15 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	}
 
 	require.Equal(t, nbNodes, len(chunks))
-	decoded, err := node.rbc.rs.Decode(chunks, threshold+1)
+	decoded, err := node.rbc.rs.Decode(chunks)
+	require.NoError(t, err)
+
+	sDecoded, err := marshaller.Unmarshal(decoded)
 	require.NoError(t, err)
 
 	// Check that the bytes of the decoded message match the original message sent
-	for i := 0; i < threshold+1; i++ {
-		require.Equal(t, s[i], decoded[i])
+	for i := 0; i < mLen; i++ {
+		require.Equal(t, s[i], sDecoded[i])
 	}
 
 	// Stop all listening networks
@@ -298,7 +311,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	nIface := network.JoinNetwork()
 	stream := NoDelayMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
-	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
+	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, 4, nIface.GetID()))
 	go func() {
 		err := node.rbc.Listen()
 		require.NoError(t, err)
@@ -420,7 +433,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	nIface := network.JoinNetwork()
 	stream := NoDelayMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
-	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
+	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, 4, nIface.GetID()))
 	go func() {
 		err := node.rbc.Listen()
 		require.NoError(t, err)
@@ -545,7 +558,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	nIface := network.JoinNetwork()
 	stream := NoDelayMockAuthStream(nIface)
 	marshaller := getMarshaller(g)
-	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, nIface.GetID()))
+	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, marshaller, g, r, nbNodes, 4, nIface.GetID()))
 	go func() {
 		err := node.rbc.Listen()
 		require.NoError(t, err)
@@ -722,7 +735,7 @@ func TestFourRoundsRBC_Simple(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -755,7 +768,7 @@ func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -797,7 +810,7 @@ func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -840,7 +853,7 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -898,7 +911,7 @@ func TestFourRoundsRBC_SlowNode(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -938,7 +951,7 @@ func TestFourRoundsRBC_SlowNodes(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -969,7 +982,7 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -997,12 +1010,8 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 
 	// Marshall the message
 	marshaller := getMarshaller(g)
-	msBytes := make([][]byte, len(s))
-	for i, m := range s {
-		b, err := marshaller.Marshal(m)
-		require.NoError(t, err)
-		msBytes[i] = b
-	}
+	msBytes, err := marshaller.Marshal(s)
+
 	inst := createProposeMessage(msBytes)
 	out, err := proto.Marshal(inst)
 	require.NoError(t, err)
@@ -1028,12 +1037,16 @@ func TestFourRoundsRBC_testStop(t *testing.T) {
 	nbNodes := 3*threshold + 1
 	g := edwards25519.NewBlakeSHA256Ed25519()
 
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen, g, g.RandomStream())
+
 	stream := NoDelayMockAuthStream(network.JoinNetwork())
 	marshaller := &ScalarMarshaller{
 		Group: g,
 	}
 	node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-		r, nbNodes, uint32(0)))
+		r, nbNodes, mLen, uint32(0)))
 
 	// Listen on the node in a go routine and expect it to cancel the context before the timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
@@ -1053,10 +1066,6 @@ func TestFourRoundsRBC_testStop(t *testing.T) {
 	require.Equal(t, context.Canceled, ctx.Err())
 
 	// Similarly but with broadcast
-
-	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen, g, g.RandomStream())
 
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second*1)
 
@@ -1099,7 +1108,7 @@ func TestFourRoundsRBC_DealAndStop(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -1167,7 +1176,7 @@ func TestFourRoundsRBC_ListenerDies(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -1245,7 +1254,7 @@ func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 
@@ -1328,7 +1337,7 @@ func TestFourRoundsRBC_Stress(t *testing.T) {
 			Group: g,
 		}
 		node := NewTestNode(stream, NewFourRoundRBC[kyber.Scalar](pred, sha256.New(), threshold, stream, marshaller, g,
-			r, nbNodes, uint32(i)))
+			r, nbNodes, mLen, uint32(i)))
 		nodes[i] = node
 	}
 

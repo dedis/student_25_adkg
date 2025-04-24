@@ -3,7 +3,7 @@ package typedefs;
 option go_package ='./typedefs';
 message Message{
   message Propose{
-    repeated bytes content=1;
+    bytes content=1;
   }
 
   message Echo{

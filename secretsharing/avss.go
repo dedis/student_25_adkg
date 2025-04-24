@@ -1,4 +1,4 @@
-package adkg
+package secretsharing
 
 import (
 	"go.dedis.ch/kyber/v4"

@@ -1,56 +1,52 @@
 package reedsolomon
 
 import (
-	"fmt"
-	"go.dedis.ch/kyber/v4"
-	"go.dedis.ch/kyber/v4/share"
+	"github.com/HACKERALERT/infectious"
 )
 
 type RSEncoder interface {
 	// Encode receives a message of k symbols and encodes it into a code of n symbols
-	Encode(msg []kyber.Scalar, n int) ([]*share.PriShare, error)
+	Encode(msg []byte) ([]infectious.Share, error)
 }
 
 type RSDecoder interface {
 	// Decode takes a message of m symbols and tries to decode the original k symbols message
-	Decode(msg []*share.PriShare, k int) ([]kyber.Scalar, error)
+	Decode(msg []infectious.Share) ([]byte, error)
 }
 
-type RSCodes struct {
-	kyber.Group
+type RSCodes interface {
+	RSEncoder
+	RSDecoder
 }
 
-func NewRSCodes(group kyber.Group) *RSCodes {
-	return &RSCodes{group}
+// BWCodes Berlekamp-Welch implementation of RS codes
+// from this library: https://pkg.go.dev/github.com/Picocrypt/infectious#NewFEC
+type BWCodes struct {
+	RSCodes
+	fec *infectious.FEC
 }
 
-func (rs *RSCodes) Encode(msg []kyber.Scalar, n int) ([]*share.PriShare, error) {
-	// TODO do we need to check that the length of the message is smaller than n?
-	// Create a polynomial from the symbols
-	poly := share.CoefficientsToPriPoly(rs.Group, msg)
-
-	// Evaluate the polynomial at n points
-	encoded := make([]*share.PriShare, n)
-	for i := 0; i < n; i++ {
-		enc := poly.Eval(uint32(i))
-		encoded[i] = enc
-	}
-	return encoded, nil
-}
-
-func (rs *RSCodes) Decode(msg []*share.PriShare, k int) ([]kyber.Scalar, error) {
-	// TODO asserts no erasure or missing values, fix this
-
-	n := len(msg)
-	if n < k {
-		return nil, fmt.Errorf("not enough scalars to decode")
-	}
-
-	// Interpolate using the k first points and retrieve the original polynomial's weights
-	poly, err := share.RecoverPriPoly(rs.Group, msg, k, n)
+func NewBWCodes(k, n int) *BWCodes {
+	fec, err := infectious.NewFEC(k, n)
 	if err != nil {
-		return nil, err
+		panic(err)
+	}
+	return &BWCodes{
+		fec: fec,
+	}
+}
+
+func (rs *BWCodes) Encode(msg []byte) ([]infectious.Share, error) {
+	shares := make([]infectious.Share, rs.fec.Total())
+	output := func(s infectious.Share) {
+		shares[s.Number] = s.DeepCopy()
 	}
 
-	return poly.Coefficients(), nil
+	err := rs.fec.Encode(msg, output)
+	return shares, err
+}
+
+func (rs *BWCodes) Decode(msg []infectious.Share) ([]byte, error) {
+	res, err := rs.fec.Decode(nil, msg)
+	return res, err
 }

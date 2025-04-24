@@ -165,7 +165,7 @@ func (x *Instruction) GetOperation() *Message {
 
 type Message_Propose struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Content       [][]byte               `protobuf:"bytes,1,rep,name=content,proto3" json:"content,omitempty"`
+	Content       []byte                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -200,7 +200,7 @@ func (*Message_Propose) Descriptor() ([]byte, []int) {
 	return file_messages_proto_rawDescGZIP(), []int{0, 0}
 }
 
-func (x *Message_Propose) GetContent() [][]byte {
+func (x *Message_Propose) GetContent() []byte {
 	if x != nil {
 		return x.Content
 	}
@@ -338,7 +338,7 @@ const file_messages_proto_rawDesc = "" +
 	"\n" +
 	"ready_inst\x18\x05 \x01(\v2\x17.typedefs.Message.ReadyH\x00R\treadyInst\x1a#\n" +
 	"\aPropose\x12\x18\n" +
-	"\acontent\x18\x01 \x03(\fR\acontent\x1a2\n" +
+	"\acontent\x18\x01 \x01(\fR\acontent\x1a2\n" +
 	"\x04Echo\x12\x0e\n" +
 	"\x02mi\x18\x01 \x01(\fR\x02mi\x12\f\n" +
 	"\x01h\x18\x02 \x01(\fR\x01h\x12\f\n" +

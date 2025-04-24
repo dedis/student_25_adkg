@@ -1,6 +1,7 @@
 package bracha
 
 import (
+	"context"
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/kyber/v4"
 	"student_25_adkg/networking"
@@ -39,8 +40,8 @@ func (iface *MockAuthStream) Broadcast(bytes []byte) error {
 	return iface.Network.Broadcast(bytes)
 }
 
-func (iface *MockAuthStream) Receive(stop <-chan struct{}) ([]byte, error) {
-	msg, err := iface.Network.Receive(stop)
+func (iface *MockAuthStream) Receive(ctx context.Context) ([]byte, error) {
+	msg, err := iface.Network.Receive(ctx)
 	time.Sleep(iface.readDelay) // Artificially delay receiving
 	return msg, err
 }
@@ -72,6 +73,8 @@ func TestBrachaRBC_Simple(t *testing.T) {
 		nodes[i] = node
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// Create a wait group to wait for all bracha instances to finish
 	wg := sync.WaitGroup{}
 	n1 := nodes[0]
@@ -79,7 +82,7 @@ func TestBrachaRBC_Simple(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := nodes[i].rbc.Listen()
+			err := nodes[i].rbc.Listen(ctx)
 			if err != nil {
 				// Log
 				t.Logf("Error listening: %v", err)
@@ -88,7 +91,7 @@ func TestBrachaRBC_Simple(t *testing.T) {
 		}()
 	}
 	// Start RBC
-	err := n1.rbc.RBroadcast(true)
+	err := n1.rbc.RBroadcast(ctx, true)
 	t.Log("Broadcast complete")
 	require.NoError(t, err)
 
@@ -100,4 +103,6 @@ func TestBrachaRBC_Simple(t *testing.T) {
 		require.True(t, finished)
 		require.True(t, val) // The value sent is True
 	}
+
+	cancel()
 }

@@ -41,4 +41,4 @@ jobs:
         run: go test -json -v -race -run TestBrachaRBC ./rbc/bracha | gotestfmt
 
       - name: run RBC FourRounds tests
-        run: go test -json -timeout 20m -v -race -run TestFourRoundsRBC ./rbc/fourRounds | gotestfmt
+        run: go test -json -timeout 20m -v -race -run TestFourRoundsRBC ./rbc/fourrounds | gotestfmt

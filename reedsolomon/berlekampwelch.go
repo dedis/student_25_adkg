@@ -26,7 +26,7 @@ func (rs *BWCodes) Encode(msg []byte) ([]Encoding, error) {
 	output := func(s infectious.Share) {
 		sCopy := s.DeepCopy()
 		shares[s.Number] = Encoding{
-			Idx: sCopy.Number,
+			Idx: int64(sCopy.Number),
 			Val: sCopy.Data,
 		}
 	}
@@ -45,7 +45,7 @@ func encodingsToShares(encodings []Encoding) []infectious.Share {
 	shares := make([]infectious.Share, len(encodings))
 	for i, encoding := range encodings {
 		shares[i] = infectious.Share{
-			Number: encoding.Idx,
+			Number: int(encoding.Idx),
 			Data:   encoding.Val,
 		}
 	}

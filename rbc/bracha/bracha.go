@@ -35,8 +35,8 @@ var (
 	}
 )
 
-// BrachaRBC implements RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
-type BrachaRBC struct {
+// RBC implements Bracha RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
+type RBC struct {
 	iface      rbc.AuthenticatedMessageStream
 	pred       func(bool) bool
 	stopChan   chan struct{}
@@ -53,7 +53,7 @@ type BrachaRBC struct {
 
 // NewBrachaRBC creates a new BrachaRBC structure. The marshal un unmarshal methods are used to convert the content
 // of the RBCMessage to and from the value type M
-func NewBrachaRBC(pred func(bool) bool, threshold int, iface rbc.AuthenticatedMessageStream, id uint32) *BrachaRBC {
+func NewBrachaRBC(pred func(bool) bool, threshold int, iface rbc.AuthenticatedMessageStream, id uint32) *RBC {
 	// Disable logging based on the GLOG environment variable
 	var logLevel zerolog.Level
 	if os.Getenv("GLOG") == "no" {
@@ -69,7 +69,7 @@ func NewBrachaRBC(pred func(bool) bool, threshold int, iface rbc.AuthenticatedMe
 		Str("id", strconv.Itoa(int(id))).
 		Logger()
 
-	return &BrachaRBC{
+	return &RBC{
 		pred:       pred,
 		iface:      iface,
 		stopChan:   make(chan struct{}),
@@ -84,7 +84,7 @@ func NewBrachaRBC(pred func(bool) bool, threshold int, iface rbc.AuthenticatedMe
 	}
 }
 
-func (b *BrachaRBC) sendMsg(msg *BrachaMessage) error {
+func (b *RBC) sendMsg(msg *Message) error {
 	marshalled, err := protobuf.Encode(msg)
 	if err != nil {
 		return err
@@ -93,7 +93,7 @@ func (b *BrachaRBC) sendMsg(msg *BrachaMessage) error {
 	return err
 }
 
-func (b *BrachaRBC) start(ctx context.Context, finishedChan chan struct{}) {
+func (b *RBC) start(ctx context.Context, finishedChan chan struct{}) {
 	go func() {
 		for {
 			bs, err := b.iface.Receive(ctx)
@@ -104,13 +104,13 @@ func (b *BrachaRBC) start(ctx context.Context, finishedChan chan struct{}) {
 				b.logger.Error().Err(err).Msg("error receiving message")
 				continue
 			}
-			msg := &BrachaMessage{}
+			msg := &Message{}
 			err = protobuf.Decode(bs, msg)
 			if err != nil {
 				b.logger.Error().Err(err).Msg("error decoding message")
 				continue
 			}
-			err, finished := b.handleMsg(*msg)
+			finished, err := b.handleMsg(*msg)
 			if err != nil {
 				b.logger.Err(err).Msg("Error handling message")
 				continue
@@ -125,7 +125,7 @@ func (b *BrachaRBC) start(ctx context.Context, finishedChan chan struct{}) {
 }
 
 // RBroadcast implements the method from the RBC interface
-func (b *BrachaRBC) RBroadcast(ctx context.Context, content bool) error {
+func (b *RBC) RBroadcast(ctx context.Context, content bool) error {
 	finishedChan := make(chan struct{})
 	b.start(ctx, finishedChan)
 
@@ -140,7 +140,7 @@ func (b *BrachaRBC) RBroadcast(ctx context.Context, content bool) error {
 	return nil
 }
 
-func (b *BrachaRBC) Listen(ctx context.Context) error {
+func (b *RBC) Listen(ctx context.Context) error {
 	finishedChan := make(chan struct{})
 	b.start(ctx, finishedChan)
 
@@ -150,14 +150,14 @@ func (b *BrachaRBC) Listen(ctx context.Context) error {
 	return nil
 }
 
-func (b *BrachaRBC) startBroadcast(val bool) error {
+func (b *RBC) startBroadcast(val bool) error {
 	msg := NewBrachaMessage(PROPOSE, val)
 	err := b.sendMsg(msg)
 	return err
 }
 
 // HandleMsg implements the method from the RBC interface
-func (b *BrachaRBC) handleMsg(message BrachaMessage) (error, bool) {
+func (b *RBC) handleMsg(message Message) (bool, error) {
 	send := false
 	t := PROPOSE
 	finished := false
@@ -179,20 +179,20 @@ func (b *BrachaRBC) handleMsg(message BrachaMessage) (error, bool) {
 		toSend := NewBrachaMessage(t, message.Content)
 		err := b.sendMsg(toSend)
 		if err != nil {
-			return err, finished
+			return finished, err
 		}
 	}
-	return nil, finished
+	return finished, nil
 }
 
 // receivePropose handles the logic necessary when a PROPOSE message is received
-func (b *BrachaRBC) receivePropose(s bool) (echo bool) {
+func (b *RBC) receivePropose(s bool) (echo bool) {
 	// If the predicate match, return that an echo message should be broadcast
 	return b.pred(s)
 }
 
 // receiveEcho handles the logic necessary when a ECHO message is received
-func (b *BrachaRBC) receiveEcho(s bool) (ready bool) {
+func (b *RBC) receiveEcho(s bool) (ready bool) {
 	b.Lock()
 	defer b.Unlock()
 	// Don't do anything if the value doesn't match the predicate or the RBC protocol finished
@@ -212,7 +212,7 @@ func (b *BrachaRBC) receiveEcho(s bool) (ready bool) {
 
 // ReceiveReady handles the reception of a READY message. If enough ready messages have been received, the protocol
 // returns finished=true and the value field is set. The ready bool specifies if a ready message should be sent
-func (b *BrachaRBC) receiveReady(s bool) (finished bool, ready bool) {
+func (b *RBC) receiveReady(s bool) (finished bool, ready bool) {
 	b.RLock()
 	defer b.RUnlock()
 	// Don't do anything if the value doesn't match the predicate of the RBC protocol finished
@@ -222,7 +222,8 @@ func (b *BrachaRBC) receiveReady(s bool) (finished bool, ready bool) {
 	// Increment the count of READY messages received
 	b.readyCount++
 
-	// Send a READY message if we have received enough READY messages and a READY message has not yet been sent by this node
+	// Send a READY message if we have received enough READY messages
+	// and a READY message has not yet been sent by this node
 	ready = b.readyCount > b.threshold && !b.sentReady
 	// If ready, then mark that this node has sent a ready message
 	if ready {

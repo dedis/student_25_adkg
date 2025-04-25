@@ -11,7 +11,7 @@ import (
 
 type TestNode struct {
 	iface *MockAuthStream
-	rbc   *BrachaRBC
+	rbc   *RBC
 }
 
 // MockAuthStream mocks an authenticated message stream. Nothing is actually authenticated.
@@ -43,7 +43,7 @@ func (iface *MockAuthStream) Receive(ctx context.Context) ([]byte, error) {
 	return msg, err
 }
 
-func NewTestNode(iface *MockAuthStream, rbc *BrachaRBC) *TestNode {
+func NewTestNode(iface *MockAuthStream, rbc *RBC) *TestNode {
 	return &TestNode{
 		iface: iface,
 		rbc:   rbc,

@@ -1,6 +1,7 @@
 package networking
 
 import (
+	"context"
 	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ func Test_fake_network_join(t *testing.T) {
 	// Test adding new nodes and check that they are being added
 	for i := 0; i < nbNodes; i++ {
 		node := network.JoinNetwork()
-		expSize += 1
+		expSize++
 		// Check the list of nodes is updated
 		require.Equal(t, len(network.nodes), expSize)
 		// Check that the given queue is updated
@@ -26,6 +27,7 @@ func Test_fake_network_join(t *testing.T) {
 // Test that sending and receiving a message between two nodes works
 func Test_fake_network_Send_Receive(t *testing.T) {
 	network := NewFakeNetwork[[]byte]()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	n1 := network.JoinNetwork()
 	n2 := network.JoinNetwork()
@@ -36,15 +38,16 @@ func Test_fake_network_Send_Receive(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(1 * time.Second)
 
-	received, err := n2.Receive()
+	received, err := n2.Receive(ctx)
 	require.NoError(t, err)
 	require.Equal(t, msg, received)
-	require.True(t, n2.rcvQueue.IsEmpty())
+	cancel()
 }
 
 // Test a broadcast works correctly
 func Test_fake_network_Send_Broadcast(t *testing.T) {
 	network := NewFakeNetwork[[]byte]()
+	ctx, cancel := context.WithCancel(context.Background())
 	nbNodes := 10
 
 	nodes := make([]*FakeInterface[[]byte], nbNodes)
@@ -63,10 +66,10 @@ func Test_fake_network_Send_Broadcast(t *testing.T) {
 
 	// Check that everyone received the message (incl. n1)
 	for _, node := range nodes {
-		received, err := node.Receive()
+		received, err := node.Receive(ctx)
 		require.NotNil(t, received, "Node %d didn't receive a message", node.id)
 		require.NoError(t, err)
 		require.Equal(t, msg, received, "Node %d didn't received the right message. Got %s", node.id)
-		require.True(t, node.rcvQueue.IsEmpty(), "node %d is empty", node.id)
 	}
+	cancel()
 }

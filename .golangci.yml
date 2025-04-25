@@ -211,18 +211,6 @@ issues:
   max-same-issues: 50
 
   exclude-rules:
-    - source: "^//\\s*go:generate\\s"
-      linters: [ lll ]
-    - source: "(noinspection|TODO)"
-      linters: [ godot ]
-    - source: "//noinspection"
-      linters: [ gocritic ]
-    - source: "^\\s+if _, ok := err\\.\\([^.]+\\.InternalError\\); ok {"
-      linters: [ errorlint ]
-    - path: ".skeleton"
-      linters:
-        - unused
-        - unparam
     - path: "_test\\.go|^gui|^internal|^peer/tests"
       linters:
         - bodyclose
@@ -237,25 +225,3 @@ issues:
         - noctx
         - unparam
         - wrapcheck
-    - path: "polypus"
-      linters:
-        - forbidigo # need to use fmt.Print, as this is an interactive CLI
-    - linters:
-        - gocritic
-      text: "appendAssign:"
-    - linters:
-        - revive
-      text: "unexported-return:"
-    - linters:
-        - revive
-      text: "unused-param"
-    - linters:
-        - govet
-      text: "shadow: declaration of \"err\" shadows declaration"
-    - path: "^internal/testing|^peer/tests/"
-      linters:
-        - staticcheck
-      text:
-        "rand."
-      checks:
-        - '-SA1019' # rand.* has been deprecated since Go 1.20 because it shouldn't be used: For almost all use cases, crypto/rand.Read is more appropriate.

@@ -1,10 +1,20 @@
 package secretsharing
 
 import (
+	"context"
+	"crypto/sha256"
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/share"
 	"go.dedis.ch/kyber/v4/util/random"
+	"student_25_adkg/rbc"
+	"student_25_adkg/rbc/fourrounds"
+	"student_25_adkg/reedsolomon"
 )
+
+type SecretShare interface {
+	Share(context.Context, kyber.Scalar) error
+	Listen(context.Context) (kyber.Scalar, error)
+}
 
 type Config struct {
 	g kyber.Group
@@ -13,7 +23,9 @@ type Config struct {
 }
 
 type AVSS struct {
-	conf Config
+	id    int64
+	conf  Config
+	iface rbc.AuthenticatedMessageStream
 }
 
 func NewAVSS() *AVSS {
@@ -39,7 +51,11 @@ type Deal struct {
 	ri *share.PriShare
 }
 
-func (avss *AVSS) Deal(s kyber.Scalar) ([]Deal, *share.PubPoly) {
+func pred(bs []byte) bool {
+	return true
+}
+
+func (avss *AVSS) Share(ctx context.Context, s kyber.Scalar) ([]Deal, *share.PubPoly) {
 	// Randomly sample a polynomial s.t. the origin is a t s
 	p := share.NewPriPoly(avss.conf.g, avss.conf.t, s, random.New())
 	commit, pHat := PedPolyCommit(p, avss.conf.t, avss.conf)
@@ -51,6 +67,16 @@ func (avss *AVSS) Deal(s kyber.Scalar) ([]Deal, *share.PubPoly) {
 		}
 		deals[i-1] = d
 	}
+
+	rs := reedsolomon.NewBWCodes(avss.conf.t, avss.conf.n)
+	rbc := fourrounds.NewFourRoundRBC(pred, sha256.New(), avss.conf.t, avss.iface, rs, 2, avss.id)
+
+	commitBytes := make([]byte, 0)
+	for _, c := range commit.Shares() {
+
+	}
+
+	err := rbc.RBroadcast(ctx)
 
 	return deals, commit
 }

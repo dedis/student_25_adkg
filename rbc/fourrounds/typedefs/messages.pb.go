@@ -211,7 +211,7 @@ type Message_Echo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Mi            []byte                 `protobuf:"bytes,1,opt,name=mi,proto3" json:"mi,omitempty"`
 	H             []byte                 `protobuf:"bytes,2,opt,name=h,proto3" json:"h,omitempty"`
-	I             uint32                 `protobuf:"varint,3,opt,name=i,proto3" json:"i,omitempty"`
+	I             int64                  `protobuf:"varint,3,opt,name=i,proto3" json:"i,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -260,7 +260,7 @@ func (x *Message_Echo) GetH() []byte {
 	return nil
 }
 
-func (x *Message_Echo) GetI() uint32 {
+func (x *Message_Echo) GetI() int64 {
 	if x != nil {
 		return x.I
 	}
@@ -271,7 +271,7 @@ type Message_Ready struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Mi            []byte                 `protobuf:"bytes,1,opt,name=mi,proto3" json:"mi,omitempty"`
 	H             []byte                 `protobuf:"bytes,2,opt,name=h,proto3" json:"h,omitempty"`
-	I             uint32                 `protobuf:"varint,3,opt,name=i,proto3" json:"i,omitempty"`
+	I             int64                  `protobuf:"varint,3,opt,name=i,proto3" json:"i,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -320,7 +320,7 @@ func (x *Message_Ready) GetH() []byte {
 	return nil
 }
 
-func (x *Message_Ready) GetI() uint32 {
+func (x *Message_Ready) GetI() int64 {
 	if x != nil {
 		return x.I
 	}
@@ -342,11 +342,11 @@ const file_messages_proto_rawDesc = "" +
 	"\x04Echo\x12\x0e\n" +
 	"\x02mi\x18\x01 \x01(\fR\x02mi\x12\f\n" +
 	"\x01h\x18\x02 \x01(\fR\x01h\x12\f\n" +
-	"\x01i\x18\x03 \x01(\rR\x01i\x1a3\n" +
+	"\x01i\x18\x03 \x01(\x03R\x01i\x1a3\n" +
 	"\x05Ready\x12\x0e\n" +
 	"\x02mi\x18\x01 \x01(\fR\x02mi\x12\f\n" +
 	"\x01h\x18\x02 \x01(\fR\x01h\x12\f\n" +
-	"\x01i\x18\x03 \x01(\rR\x01iB\x04\n" +
+	"\x01i\x18\x03 \x01(\x03R\x01iB\x04\n" +
 	"\x02op\">\n" +
 	"\vInstruction\x12/\n" +
 	"\toperation\x18\x01 \x01(\v2\x11.typedefs.MessageR\toperationB\fZ\n" +

@@ -2,7 +2,7 @@ package reedsolomon
 
 // Encoding represents an encoded part of a message containing its byte value and its index in the encoded message
 type Encoding struct {
-	Idx int
+	Idx int64
 	Val []byte
 }
 

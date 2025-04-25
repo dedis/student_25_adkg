@@ -1,4 +1,4 @@
-package fourRounds
+package fourrounds
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"math/rand"
 	"student_25_adkg/networking"
-	"student_25_adkg/rbc/fourRounds/typedefs"
+	"student_25_adkg/rbc/fourrounds/typedefs"
 	"student_25_adkg/reedsolomon"
 	"sync"
 	"testing"
@@ -67,7 +67,7 @@ func NewTestNode(iface *MockAuthStream, rbc *FourRoundRBC) *TestNode {
 	}
 }
 
-func startDummyNode(stream *MockAuthStream, ctx context.Context) {
+func startDummyNode(ctx context.Context, stream *MockAuthStream) {
 	go func() {
 		for {
 			_, _ = stream.Receive(ctx)
@@ -163,7 +163,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
-		startDummyNode(NoDelayMockAuthStream(iface), ctx)
+		startDummyNode(ctx, NoDelayMockAuthStream(iface))
 	}
 
 	// Send a PROPOSE message to the test node and check that it answers correctly
@@ -237,7 +237,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 		switch op := msg.GetOperation().GetOp().(type) {
 		case *typedefs.Message_EchoInst:
 			chunks[op.EchoInst.I] = reedsolomon.Encoding{
-				Idx: int(op.EchoInst.I),
+				Idx: op.EchoInst.I,
 				Val: op.EchoInst.Mi,
 			}
 		default:
@@ -284,7 +284,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(NoDelayMockAuthStream(iface), ctx)
+		startDummyNode(ctx, NoDelayMockAuthStream(iface))
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -299,7 +299,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 		// Send the ECHO message to the real node
 		err := interfaces[0].Send(echoBytes, node.GetID())
 		require.NoError(t, err)
-		sent += 1
+		sent++
 		// Wait a few milliseconds to make sure the node received and processed the message
 		time.Sleep(10 * time.Millisecond)
 
@@ -317,7 +317,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	require.NoError(t, err)
 	err = interfaces[0].Send(echoBytes2, node.GetID())
 	require.NoError(t, err)
-	sent += 1
+	sent++
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -331,7 +331,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	// Sent another echo and expect a ready message to be broadcast
 	err = interfaces[0].Send(echoBytes, node.GetID())
 	require.NoError(t, err)
-	sent += 1
+	sent++
 	// Wait sometime to leave time for the node to have sent all its messages
 	time.Sleep(10 * time.Millisecond)
 
@@ -352,7 +352,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	// Send another ECHO and check that no other message is sent by the node
 	err = interfaces[0].Send(echoBytes, node.GetID())
 	require.NoError(t, err)
-	sent += 1
+	sent++
 
 	time.Sleep(10 * time.Millisecond)
 	nReceived = node.GetReceived()
@@ -400,7 +400,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(NoDelayMockAuthStream(iface), ctx)
+		startDummyNode(ctx, NoDelayMockAuthStream(iface))
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -416,7 +416,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	for i := 0; i < readyThreshold-1; i++ {
 		err := interfaces[0].Send(readyBytes, node.GetID())
 		require.NoError(t, err)
-		sent += 1
+		sent++
 
 		time.Sleep(10 * time.Millisecond)
 
@@ -432,7 +432,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	// Send t+1 message and expect nothing
 	err = interfaces[0].Send(readyBytes, node.GetID())
 	require.NoError(t, err)
-	sent += 1
+	sent++
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -457,7 +457,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	for i := 0; i < echoThreshold-1; i++ {
 		err := interfaces[0].Send(echoBytes, node.GetID())
 		require.NoError(t, err)
-		sent += 1
+		sent++
 
 		time.Sleep(10 * time.Millisecond)
 
@@ -523,7 +523,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(NoDelayMockAuthStream(iface), ctx)
+		startDummyNode(ctx, NoDelayMockAuthStream(iface))
 	}
 
 	// Create a READY message
@@ -545,7 +545,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	for i := 0; i < echoThreshold; i++ {
 		err := interfaces[0].Send(echoBytes, node.GetID())
 		require.NoError(t, err)
-		sent += 1
+		sent++
 
 		time.Sleep(10 * time.Millisecond)
 
@@ -563,7 +563,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	for i := 0; i < readyThreshold-1; i++ {
 		err := interfaces[0].Send(readyBytes, node.GetID())
 		require.NoError(t, err)
-		sent += 1
+		sent++
 
 		time.Sleep(10 * time.Millisecond)
 

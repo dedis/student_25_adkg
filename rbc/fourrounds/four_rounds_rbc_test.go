@@ -208,7 +208,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 			require.NoError(t, err)
 			switch op := msg.Operation.Op.(type) {
 			case *typedefs.Message_EchoInst:
-				require.Equal(t, uint32(j), op.EchoInst.I)
+				require.Equal(t, int64(j), op.EchoInst.I)
 				require.True(t, bytes.Equal(op.EchoInst.H, sHash))
 			default:
 				require.Fail(t, "Unexpected message type: %T", msg)

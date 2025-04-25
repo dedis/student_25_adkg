@@ -1,12 +1,12 @@
 package bracha
 
-type BrachaMessage struct {
+type Message struct {
 	MsgType MessageType
 	Content bool
 }
 
-func NewBrachaMessage(msgType MessageType, content bool) *BrachaMessage {
-	return &BrachaMessage{
+func NewBrachaMessage(msgType MessageType, content bool) *Message {
+	return &Message{
 		MsgType: msgType,
 		Content: content,
 	}

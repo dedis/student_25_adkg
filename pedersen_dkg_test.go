@@ -18,7 +18,6 @@ type TestNode struct {
 	Private kyber.Scalar
 	Public  kyber.Point
 	dkg     *dkg.DistKeyGenerator
-	res     *dkg.Result
 }
 
 func NewTestNode(s dkg.Suite, index int) *TestNode {
@@ -184,4 +183,5 @@ func Test_run_dkg_and_sign_message(t *testing.T) {
 	require.NoError(t, err)
 
 	err = eddsa.Verify(publicKey.V, msg, signed)
+	require.NoError(t, err)
 }

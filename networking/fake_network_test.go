@@ -20,7 +20,7 @@ func Test_fake_network_join(t *testing.T) {
 		// Check the list of nodes is updated
 		require.Equal(t, len(network.nodes), expSize)
 		// Check that the given queue is updated
-		require.Equal(t, network.nodes[int(node.id)], node.rcvQueue)
+		require.Equal(t, network.nodes[node.id], node.rcvQueue)
 	}
 }
 

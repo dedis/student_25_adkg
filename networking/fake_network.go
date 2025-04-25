@@ -9,13 +9,13 @@ import (
 // FakeNetwork is a structure implementing a network. It connects the interfaces of all nodes. T is the type of the
 // messages
 type FakeNetwork[T any] struct {
-	nodes map[int]chan T
+	nodes map[int64]chan T
 	in    chan T
 }
 
 func NewFakeNetwork[T any]() *FakeNetwork[T] {
 	return &FakeNetwork[T]{
-		nodes: make(map[int]chan T),
+		nodes: make(map[int64]chan T),
 		in:    make(chan T, 500),
 	}
 }
@@ -28,7 +28,7 @@ func (n *FakeNetwork[T]) JoinWithBuffer(size int) *FakeInterface[T] {
 	queue := make(chan T, size)
 	iface := NewFakeInterface[T](queue, n.Send, n.Broadcast, n.freshID())
 
-	n.nodes[int(iface.id)] = iface.rcvQueue
+	n.nodes[iface.id] = iface.rcvQueue
 
 	return iface
 }
@@ -38,7 +38,7 @@ func (n *FakeNetwork[T]) JoinNetwork() *FakeInterface[T] {
 }
 
 func (n *FakeNetwork[T]) Send(msg T, to int64) error {
-	rcv, ok := n.nodes[int(to)]
+	rcv, ok := n.nodes[to]
 	if !ok {
 		return fmt.Errorf("destination node %d not found", to)
 	}
@@ -49,7 +49,7 @@ func (n *FakeNetwork[T]) Send(msg T, to int64) error {
 
 func (n *FakeNetwork[T]) Broadcast(msg T) error {
 	for i := range n.nodes {
-		err := n.Send(msg, int64(i))
+		err := n.Send(msg, i)
 		if err != nil {
 			return err
 		}

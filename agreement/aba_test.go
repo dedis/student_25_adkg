@@ -15,24 +15,19 @@ func ABADefaultSetup() (
 	threshold int,
 	abaInstances []*ABA,
 	decidedVals []int,
+	ctx context.Context,
+	cancel context.CancelFunc,
+	agreementID int,
 ) {
 	nParticipants = 4
 	threshold = 1
+	agreementID = 1
 	abaInstances = make([]*ABA, nParticipants)
 	decidedVals = make([]int, nParticipants)
-	return
-}
 
-// Assume 3t+1 correct processes. Everyone broadcasts 1.
-// Eventually everyone should decide 1.
-func TestABA_Simple(t *testing.T) {
 	network := networking.NewFakeNetwork[[]byte]()
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, abaInstances, decidedVals := ABADefaultSetup()
-	proposalVal := 1
-	agreementID := 1
+	ctx, cancel = context.WithCancel(context.Background())
 
 	for i := 0; i < nParticipants; i++ {
 		iface := network.JoinNetwork()
@@ -47,7 +42,20 @@ func TestABA_Simple(t *testing.T) {
 		abaStream.Listen(ctx, abaNode)
 		abaInstances[i] = abaNode.ABAManager.GetOrCreate(strconv.Itoa(agreementID))
 	}
+	return
+}
 
+func ABANetworkSetup([]*ABA) {
+
+}
+
+// Assume 3t+1 correct processes. Everyone broadcasts 1.
+// Eventually everyone should decide 1.
+func TestABA_Simple(t *testing.T) {
+
+	nParticipants, _, abaInstances, decidedVals, _, cancel, _ := ABADefaultSetup()
+
+	proposalVal := 1
 	wg := sync.WaitGroup{}
 	wg.Add(nParticipants)
 	for i := 0; i < nParticipants; i++ {
@@ -77,27 +85,8 @@ func TestABA_Simple(t *testing.T) {
 // !!! Now can only see it in the logs.
 // ❯ GLOG=debug go test -run TestABA_WithCoin  -v -race  -count 1
 func TestABA_WithCoin(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, abaInstances, decidedVals := ABADefaultSetup()
-	// proposalVal := 1
-	agreementID := 1
-
-	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
-		abaStream := NewABAStream(iface)
-		nodeConf := &ABACommonConfig{
-			NParticipants: nParticipants,
-			Threshold:     threshold,
-			NodeID:        i,
-			BroadcastFn:   abaStream.Broadcast,
-		}
-		abaNode := NewABANode(*nodeConf)
-		abaStream.Listen(ctx, abaNode)
-		abaInstances[i] = abaNode.ABAManager.GetOrCreate(strconv.Itoa(agreementID))
-	}
+	nParticipants, _, abaInstances, decidedVals, _, cancel, _ := ABADefaultSetup()
 
 	wg := sync.WaitGroup{}
 	wg.Add(nParticipants)

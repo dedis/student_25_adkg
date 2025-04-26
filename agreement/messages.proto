@@ -1,0 +1,41 @@
+syntax = "proto3";
+package typedefs;
+option go_package ='./typedefs';
+
+// Binary Value (BV) Message
+message BVMessage {
+  string round_id = 1;
+  int32 source_node = 2;
+  int32 bin_value = 3;
+}
+
+// Auxiliary (Aux) Message
+message AuxMessage {
+  string round_id = 1;
+  int32 source_node = 2;
+  int32 bin_value = 3;
+}
+
+enum View {
+  VIEW_UNSPECIFIED = 0;
+  UNDECIDED = 1;
+  ZERO = 2;
+  ONE = 3;
+  UNDECIDED_ZERO = 4;
+  UNDECIDED_ONE = 5;
+  ZERO_ONE = 6;
+}
+
+message AuxSetMessage {
+  string round_id = 1;
+  int32 source_node = 2;
+  View view = 3;
+}
+
+message ABAEnvelope {
+  oneof msg {
+    BVMessage bv_msg = 1;
+    AuxMessage aux_msg = 2;
+    AuxSetMessage aux_set_msg = 3;
+  }
+}

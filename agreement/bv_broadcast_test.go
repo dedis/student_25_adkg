@@ -25,16 +25,25 @@ func BVDefaultSetup() (
 	return
 }
 
-// Assume 3t+1 correct processes. Everyone broadcasts 1.
-// Eventually all binvalues will contain 1.
-// Getting notification on addition to binValues IS tested.
-func TestABA_BVBroadcast_NotifySimple(t *testing.T) {
+func BVDefaultNetworkSetup() (
+	nParticipants int,
+	threshold int,
+	notifyChs []chan struct{},
+	abaID string,
+	bvInstances []*BVBroadcast,
+	ctx context.Context,
+	cancel context.CancelFunc,
+	agreementID int,
+) {
+	nParticipants = 4
+	threshold = 1
+	notifyChs = make([]chan struct{}, nParticipants)
+	abaID = "bv_test"
+	bvInstances = make([]*BVBroadcast, nParticipants)
+
 	network := networking.NewFakeNetwork[[]byte]()
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, notifyChs, abaID, bvInstances := BVDefaultSetup()
-	proposalVal := 1
+	ctx, cancel = context.WithCancel(context.Background())
 
 	for i := 0; i < nParticipants; i++ {
 		iface := network.JoinNetwork()
@@ -48,8 +57,18 @@ func TestABA_BVBroadcast_NotifySimple(t *testing.T) {
 		abaNode := NewABANode(*nodeConf)
 		abaStream.Listen(ctx, abaNode)
 		bvInstances[i] = abaNode.BVManager.GetOrCreate(abaID)
-
 	}
+
+	return
+}
+
+// Assume 3t+1 correct processes. Everyone broadcasts 1.
+// Eventually all binvalues will contain 1.
+// Getting notification on addition to binValues IS tested.
+func TestABA_BVBroadcast_NotifySimple(t *testing.T) {
+
+	nParticipants, _, notifyChs, abaID, bvInstances, _, cancel, _ := BVDefaultNetworkSetup()
+	proposalVal := 1
 
 	wg := sync.WaitGroup{}
 	wg.Add(nParticipants)

@@ -13,7 +13,7 @@ const EnvLogLevel = "GLOG"
 
 // what is nolevel
 // const defaultLevel = zerolog.NoLevel
-const defaultLevel = zerolog.DebugLevel
+const defaultLevel = zerolog.Disabled
 
 func init() {
 	lvl := os.Getenv(EnvLogLevel)

@@ -30,6 +30,7 @@ type ABAConfig struct {
 	BroadcastFn   func(proto.Message) error
 	AgreementID   int
 	SBVManager    *InstanceManager[SBVBroadcast, SBVBroadcastConfig]
+	CCoinManageer *InstanceManager[CommonCoin, CommonCoinConfig]
 }
 
 func NewABAFromConf(conf *ABAConfig) *ABA {
@@ -40,6 +41,7 @@ func NewABAFromConf(conf *ABAConfig) *ABA {
 		BroadcastFn:       conf.BroadcastFn,
 		AgreementObjectID: conf.AgreementID,
 		SBVManager:        *conf.SBVManager,
+		CCoinManageer:     conf.CCoinManageer,
 	}
 	roundManager := NewInstanceManager[ABARound, ABARoundConfig](roundConfig, NewABARoundFromConfig,
 		func(base *ABARoundConfig, id string) *ABARoundConfig {
@@ -81,6 +83,7 @@ type ABARound struct {
 	decidedCh     chan int
 	queuedMsgs    map[*typedefs.AuxSetMessage]struct{}
 	isActive      bool
+	CCoinManageer *InstanceManager[CommonCoin, CommonCoinConfig]
 }
 
 type ABARoundConfig struct {
@@ -93,6 +96,7 @@ type ABARoundConfig struct {
 	AgreementObjectID int
 	Est               int
 	SBVManager        InstanceManager[SBVBroadcast, SBVBroadcastConfig]
+	CCoinManageer     *InstanceManager[CommonCoin, CommonCoinConfig]
 }
 
 func NewABARoundFromConfig(conf *ABARoundConfig) *ABARound {
@@ -112,6 +116,7 @@ func NewABARoundFromConfig(conf *ABARoundConfig) *ABARound {
 		agreementID:   conf.AgreementObjectID,
 		decidedCh:     make(chan int, 1),
 		queuedMsgs:    make(map[*typedefs.AuxSetMessage]struct{}),
+		CCoinManageer: conf.CCoinManageer,
 	}
 }
 
@@ -201,7 +206,10 @@ func (a *ABARound) Start(est int) (int, error) {
 		return a.est, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
 	}
 
-	var coinVal int // TODO = commoncoin.random()
+	coinVal, err := a.CCoinManageer.GetOrCreate(curStageRoundID.String()).Flip()
+	if err != nil {
+		return a.est, fmt.Errorf("failed to flip a coin during aba round %d at node %d, err: %s", a.round, a.nodeID, err.Error())
+	}
 	if a.views[2].Length() == 1 &&
 		!a.views[2].ContainsUndecided() {
 		a.est = a.views[2].AsInts()[0]

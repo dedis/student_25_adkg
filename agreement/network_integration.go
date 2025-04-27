@@ -13,36 +13,30 @@ import (
 )
 
 type ABANode struct {
-	BVManager  *InstanceManager[BVBroadcast, BVBroadcastConfig]
-	SBVManager *InstanceManager[SBVBroadcast, SBVBroadcastConfig]
-	ABAManager *InstanceManager[ABA, ABAConfig]
+	BVManager     *InstanceManager[BVBroadcast, BVBroadcastConfig]
+	SBVManager    *InstanceManager[SBVBroadcast, SBVBroadcastConfig]
+	ABAManager    *InstanceManager[ABA, ABAConfig]
+	CCoinManageer *InstanceManager[CommonCoin, CommonCoinConfig]
 }
-
-// func (b *ABANode) RunABA(agreementID int, value int) (int, error) {
-// 	abaInst := b.ABAManager.GetOrCreate(strconv.Itoa(agreementID))
-// 	decidedVal, err := abaInst.Propose(value)
-// 	if err != nil {
-// 		logger.Error().Msgf("failed to reach ABA on %d at node %d", agreementID, abaInst.nodeID)
-// 		return UndecidedBinVal, err
-// 	}
-// 	// return a channel to communicate decided binvalue?
-// 	return decidedVal, nil
-// }
 
 func (b *ABANode) HandleBVMessage(msg *typedefs.ABAEnvelope_BvMsg) (int, bool, error) {
 	return b.BVManager.GetOrCreate(msg.BvMsg.GetRoundId()).HandleMessage(msg.BvMsg)
 }
 
-func (b *ABANode) HandleSBVMessage(msg *typedefs.ABAEnvelope_AuxMsg) error {
+func (b *ABANode) HandleAuxMessage(msg *typedefs.ABAEnvelope_AuxMsg) error {
 	return b.SBVManager.GetOrCreate(msg.AuxMsg.GetRoundId()).HandleMessage(msg.AuxMsg)
 }
 
-func (b *ABANode) HandleABAMessage(msg *typedefs.ABAEnvelope_AuxSetMsg) error {
+func (b *ABANode) HandleAuxSetMessage(msg *typedefs.ABAEnvelope_AuxSetMsg) error {
 	abaRoundId, err := ABARoundUIDFromString(msg.AuxSetMsg.GetRoundId())
 	if err != nil {
 		logger.Error().Msgf("failed to convert %s to ABARoundUID, %v", msg.AuxSetMsg.GetRoundId(), err)
 	}
 	return b.ABAManager.GetOrCreate(strconv.Itoa(abaRoundId.AgreementID)).HandleMessage(msg.AuxSetMsg)
+}
+
+func (b *ABANode) HandleCoinMessage(msg *typedefs.ABAEnvelope_CoinMsg) error {
+	return b.CCoinManageer.GetOrCreate(msg.CoinMsg.BroadcastId).HandleMessage(msg.CoinMsg)
 }
 
 func (b *ABANode) GetBV(id string) *BVBroadcast {
@@ -80,12 +74,30 @@ func NewABANode(conf ABACommonConfig) *ABANode {
 		},
 	)
 
+	coinConfig := &CommonCoinConfig{
+		NParticipants: conf.NParticipants,
+		Threshold:     conf.NParticipants - conf.Threshold,
+		NodeID:        conf.NodeID,
+		BroadcastFn:   conf.BroadcastFn,
+		LocalShare:    conf.LocalShare,
+		PubCommitment: conf.PubCommitment,
+		Scheme:        conf.Scheme,
+	}
+
+	coinManager := NewInstanceManager(coinConfig, NewCommonCoinFromConfig,
+		func(base *CommonCoinConfig, id string) *CommonCoinConfig {
+			base.BroadcastID = id // same as string of ABARoundUID
+			return base
+		},
+	)
+
 	abaConfig := &ABAConfig{
 		NParticipants: conf.NParticipants,
 		Threshold:     conf.Threshold,
 		NodeID:        conf.NodeID,
 		BroadcastFn:   conf.BroadcastFn,
 		SBVManager:    sbvManager,
+		CCoinManageer: coinManager,
 	}
 
 	abaManager := NewInstanceManager(abaConfig, NewABAFromConf,
@@ -104,9 +116,10 @@ func NewABANode(conf ABACommonConfig) *ABANode {
 		})
 
 	return &ABANode{
-		BVManager:  bvManager,
-		SBVManager: sbvManager,
-		ABAManager: abaManager,
+		BVManager:     bvManager,
+		SBVManager:    sbvManager,
+		ABAManager:    abaManager,
+		CCoinManageer: coinManager,
 	}
 }
 
@@ -133,6 +146,10 @@ func EncodeABAMessage(msg proto.Message) ([]byte, error) {
 	case *typedefs.AuxSetMessage:
 		return proto.Marshal(&typedefs.ABAEnvelope{
 			Msg: &typedefs.ABAEnvelope_AuxSetMsg{AuxSetMsg: m},
+		})
+	case *typedefs.CoinMessage:
+		return proto.Marshal(&typedefs.ABAEnvelope{
+			Msg: &typedefs.ABAEnvelope_CoinMsg{CoinMsg: m},
 		})
 	default:
 		return nil, fmt.Errorf("unsupported message type: %T", msg)
@@ -201,12 +218,17 @@ func (abas *ABAStream) Listen(ctx context.Context, node *ABANode) {
 					panic(err)
 				}
 			case *typedefs.ABAEnvelope_AuxMsg:
-				err := node.HandleSBVMessage(m)
+				err := node.HandleAuxMessage(m)
 				if err != nil {
 					panic(err)
 				}
 			case *typedefs.ABAEnvelope_AuxSetMsg:
-				err := node.HandleABAMessage(m)
+				err := node.HandleAuxSetMessage(m)
+				if err != nil {
+					panic(err)
+				}
+			case *typedefs.ABAEnvelope_CoinMsg:
+				err := node.HandleCoinMessage(m)
 				if err != nil {
 					panic(err)
 				}

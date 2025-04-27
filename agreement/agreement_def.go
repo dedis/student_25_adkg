@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	"go.dedis.ch/kyber/v4/share"
+	"go.dedis.ch/kyber/v4/sign"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -19,6 +21,9 @@ type ABACommonConfig struct {
 	Threshold     int
 	NodeID        int
 	BroadcastFn   func(proto.Message) error
+	LocalShare    *share.PriShare
+	PubCommitment *share.PubPoly
+	Scheme        sign.ThresholdScheme
 }
 
 func (conf *ABACommonConfig) CopySetNodeID(nodeID int) ABACommonConfig {

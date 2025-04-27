@@ -2,12 +2,17 @@ package agreement
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"student_25_adkg/networking"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.dedis.ch/kyber/v4/pairing/bn256"
+	"go.dedis.ch/kyber/v4/share"
+	"go.dedis.ch/kyber/v4/sign/tbls"
+	"go.dedis.ch/kyber/v4/xof/blake2xb"
 )
 
 func ABADefaultSetup() (
@@ -29,6 +34,17 @@ func ABADefaultSetup() (
 
 	ctx, cancel = context.WithCancel(context.Background())
 
+	// localShare share.PriShare, pubCommitment *share.PubPoly for each coin
+	seedBytes := []byte(fmt.Sprintf("Hello Common Coin {}"))
+	stream := blake2xb.New(seedBytes)
+	suite := bn256.NewSuiteRand(stream)
+	scheme := tbls.NewThresholdSchemeOnG1(suite)
+
+	secret := suite.G1().Scalar().Pick(stream)
+	priPoly := share.NewPriPoly(suite.G2(), threshold, secret, stream)
+	pubPoly := priPoly.Commit(suite.G2().Point().Base())
+	priShares := priPoly.Shares(nParticipants)
+
 	for i := 0; i < nParticipants; i++ {
 		iface := network.JoinNetwork()
 		abaStream := NewABAStream(iface)
@@ -37,6 +53,9 @@ func ABADefaultSetup() (
 			Threshold:     threshold,
 			NodeID:        i,
 			BroadcastFn:   abaStream.Broadcast,
+			Scheme:        scheme,
+			LocalShare:    priShares[i],
+			PubCommitment: pubPoly,
 		}
 		abaNode := NewABANode(*nodeConf)
 		abaStream.Listen(ctx, abaNode)

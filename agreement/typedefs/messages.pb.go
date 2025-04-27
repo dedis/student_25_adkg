@@ -264,6 +264,74 @@ func (x *AuxSetMessage) GetView() View {
 	return View_VIEW_UNSPECIFIED
 }
 
+type CoinMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BroadcastId   string                 `protobuf:"bytes,1,opt,name=broadcast_id,json=broadcastId,proto3" json:"broadcast_id,omitempty"`
+	SourceNode    int32                  `protobuf:"varint,2,opt,name=source_node,json=sourceNode,proto3" json:"source_node,omitempty"`
+	Round         uint64                 `protobuf:"varint,3,opt,name=round,proto3" json:"round,omitempty"`
+	SigShare      []byte                 `protobuf:"bytes,4,opt,name=sig_share,json=sigShare,proto3" json:"sig_share,omitempty"` // Raw bytes for the signature share.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CoinMessage) Reset() {
+	*x = CoinMessage{}
+	mi := &file_messages_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CoinMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CoinMessage) ProtoMessage() {}
+
+func (x *CoinMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CoinMessage.ProtoReflect.Descriptor instead.
+func (*CoinMessage) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CoinMessage) GetBroadcastId() string {
+	if x != nil {
+		return x.BroadcastId
+	}
+	return ""
+}
+
+func (x *CoinMessage) GetSourceNode() int32 {
+	if x != nil {
+		return x.SourceNode
+	}
+	return 0
+}
+
+func (x *CoinMessage) GetRound() uint64 {
+	if x != nil {
+		return x.Round
+	}
+	return 0
+}
+
+func (x *CoinMessage) GetSigShare() []byte {
+	if x != nil {
+		return x.SigShare
+	}
+	return nil
+}
+
 type ABAEnvelope struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Msg:
@@ -271,6 +339,7 @@ type ABAEnvelope struct {
 	//	*ABAEnvelope_BvMsg
 	//	*ABAEnvelope_AuxMsg
 	//	*ABAEnvelope_AuxSetMsg
+	//	*ABAEnvelope_CoinMsg
 	Msg           isABAEnvelope_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -278,7 +347,7 @@ type ABAEnvelope struct {
 
 func (x *ABAEnvelope) Reset() {
 	*x = ABAEnvelope{}
-	mi := &file_messages_proto_msgTypes[3]
+	mi := &file_messages_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -290,7 +359,7 @@ func (x *ABAEnvelope) String() string {
 func (*ABAEnvelope) ProtoMessage() {}
 
 func (x *ABAEnvelope) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[3]
+	mi := &file_messages_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -303,7 +372,7 @@ func (x *ABAEnvelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ABAEnvelope.ProtoReflect.Descriptor instead.
 func (*ABAEnvelope) Descriptor() ([]byte, []int) {
-	return file_messages_proto_rawDescGZIP(), []int{3}
+	return file_messages_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ABAEnvelope) GetMsg() isABAEnvelope_Msg {
@@ -340,6 +409,15 @@ func (x *ABAEnvelope) GetAuxSetMsg() *AuxSetMessage {
 	return nil
 }
 
+func (x *ABAEnvelope) GetCoinMsg() *CoinMessage {
+	if x != nil {
+		if x, ok := x.Msg.(*ABAEnvelope_CoinMsg); ok {
+			return x.CoinMsg
+		}
+	}
+	return nil
+}
+
 type isABAEnvelope_Msg interface {
 	isABAEnvelope_Msg()
 }
@@ -356,11 +434,17 @@ type ABAEnvelope_AuxSetMsg struct {
 	AuxSetMsg *AuxSetMessage `protobuf:"bytes,3,opt,name=aux_set_msg,json=auxSetMsg,proto3,oneof"`
 }
 
+type ABAEnvelope_CoinMsg struct {
+	CoinMsg *CoinMessage `protobuf:"bytes,4,opt,name=coin_msg,json=coinMsg,proto3,oneof"`
+}
+
 func (*ABAEnvelope_BvMsg) isABAEnvelope_Msg() {}
 
 func (*ABAEnvelope_AuxMsg) isABAEnvelope_Msg() {}
 
 func (*ABAEnvelope_AuxSetMsg) isABAEnvelope_Msg() {}
+
+func (*ABAEnvelope_CoinMsg) isABAEnvelope_Msg() {}
 
 var File_messages_proto protoreflect.FileDescriptor
 
@@ -382,11 +466,18 @@ const file_messages_proto_rawDesc = "" +
 	"\bround_id\x18\x01 \x01(\tR\aroundId\x12\x1f\n" +
 	"\vsource_node\x18\x02 \x01(\x05R\n" +
 	"sourceNode\x12\"\n" +
-	"\x04view\x18\x03 \x01(\x0e2\x0e.typedefs.ViewR\x04view\"\xae\x01\n" +
+	"\x04view\x18\x03 \x01(\x0e2\x0e.typedefs.ViewR\x04view\"\x84\x01\n" +
+	"\vCoinMessage\x12!\n" +
+	"\fbroadcast_id\x18\x01 \x01(\tR\vbroadcastId\x12\x1f\n" +
+	"\vsource_node\x18\x02 \x01(\x05R\n" +
+	"sourceNode\x12\x14\n" +
+	"\x05round\x18\x03 \x01(\x04R\x05round\x12\x1b\n" +
+	"\tsig_share\x18\x04 \x01(\fR\bsigShare\"\xe2\x01\n" +
 	"\vABAEnvelope\x12,\n" +
 	"\x06bv_msg\x18\x01 \x01(\v2\x13.typedefs.BVMessageH\x00R\x05bvMsg\x12/\n" +
 	"\aaux_msg\x18\x02 \x01(\v2\x14.typedefs.AuxMessageH\x00R\x06auxMsg\x129\n" +
-	"\vaux_set_msg\x18\x03 \x01(\v2\x17.typedefs.AuxSetMessageH\x00R\tauxSetMsgB\x05\n" +
+	"\vaux_set_msg\x18\x03 \x01(\v2\x17.typedefs.AuxSetMessageH\x00R\tauxSetMsg\x122\n" +
+	"\bcoin_msg\x18\x04 \x01(\v2\x15.typedefs.CoinMessageH\x00R\acoinMsgB\x05\n" +
 	"\x03msg*s\n" +
 	"\x04View\x12\x14\n" +
 	"\x10VIEW_UNSPECIFIED\x10\x00\x12\r\n" +
@@ -411,24 +502,26 @@ func file_messages_proto_rawDescGZIP() []byte {
 }
 
 var file_messages_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_messages_proto_goTypes = []any{
 	(View)(0),             // 0: typedefs.View
 	(*BVMessage)(nil),     // 1: typedefs.BVMessage
 	(*AuxMessage)(nil),    // 2: typedefs.AuxMessage
 	(*AuxSetMessage)(nil), // 3: typedefs.AuxSetMessage
-	(*ABAEnvelope)(nil),   // 4: typedefs.ABAEnvelope
+	(*CoinMessage)(nil),   // 4: typedefs.CoinMessage
+	(*ABAEnvelope)(nil),   // 5: typedefs.ABAEnvelope
 }
 var file_messages_proto_depIdxs = []int32{
 	0, // 0: typedefs.AuxSetMessage.view:type_name -> typedefs.View
 	1, // 1: typedefs.ABAEnvelope.bv_msg:type_name -> typedefs.BVMessage
 	2, // 2: typedefs.ABAEnvelope.aux_msg:type_name -> typedefs.AuxMessage
 	3, // 3: typedefs.ABAEnvelope.aux_set_msg:type_name -> typedefs.AuxSetMessage
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 4: typedefs.ABAEnvelope.coin_msg:type_name -> typedefs.CoinMessage
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_messages_proto_init() }
@@ -436,10 +529,11 @@ func file_messages_proto_init() {
 	if File_messages_proto != nil {
 		return
 	}
-	file_messages_proto_msgTypes[3].OneofWrappers = []any{
+	file_messages_proto_msgTypes[4].OneofWrappers = []any{
 		(*ABAEnvelope_BvMsg)(nil),
 		(*ABAEnvelope_AuxMsg)(nil),
 		(*ABAEnvelope_AuxSetMsg)(nil),
+		(*ABAEnvelope_CoinMsg)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -447,7 +541,7 @@ func file_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_messages_proto_rawDesc), len(file_messages_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

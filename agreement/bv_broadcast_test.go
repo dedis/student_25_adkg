@@ -3,6 +3,7 @@ package agreement
 import (
 	"context"
 	"student_25_adkg/networking"
+	"student_25_adkg/transport/tcp"
 	"sync"
 	"testing"
 	"time"
@@ -17,8 +18,8 @@ func BVDefaultSetup() (
 	abaID string,
 	bvInstances []*BVBroadcast,
 ) {
-	nParticipants = 4
-	threshold = 1
+	nParticipants = 16
+	threshold = 5
 	notifyChs = make([]chan struct{}, nParticipants)
 	abaID = "bv_test"
 	bvInstances = make([]*BVBroadcast, nParticipants)
@@ -41,12 +42,18 @@ func BVDefaultNetworkSetup() (
 	abaID = "bv_test"
 	bvInstances = make([]*BVBroadcast, nParticipants)
 
-	network := networking.NewFakeNetwork[[]byte]()
+	// network := networking.NewFakeNetwork[[]byte]()
+	// network := networking.NewTransportNetwork(udp.NewUDP())
+	network := networking.NewTransportNetwork(tcp.NewTCP())
 
 	ctx, cancel = context.WithCancel(context.Background())
 
 	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
+		iface, err := network.JoinNetwork()
+		// require.NoError(t, err)
+		if err != nil {
+			panic(err)
+		}
 		abaStream := NewABAStream(iface)
 		nodeConf := &ABACommonConfig{
 			NParticipants: nParticipants,

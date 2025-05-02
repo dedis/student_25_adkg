@@ -16,7 +16,7 @@ type FakeNetwork[T any] struct {
 func NewFakeNetwork[T any]() *FakeNetwork[T] {
 	return &FakeNetwork[T]{
 		nodes: make(map[int64]chan T),
-		in:    make(chan T, 500),
+		in:    make(chan T, 50000),
 	}
 }
 
@@ -34,7 +34,7 @@ func (n *FakeNetwork[T]) JoinWithBuffer(size int) *FakeInterface[T] {
 }
 
 func (n *FakeNetwork[T]) JoinNetwork() *FakeInterface[T] {
-	return n.JoinWithBuffer(100)
+	return n.JoinWithBuffer(10000)
 }
 
 func (n *FakeNetwork[T]) Send(msg T, to int64) error {
@@ -57,19 +57,6 @@ func (n *FakeNetwork[T]) Broadcast(msg T) error {
 	return nil
 }
 
-// NetworkInterface represents an interface used by a node to communicate in the network
-type NetworkInterface[T any] interface {
-	// Send allows to send a byte message to a recipient addressed by an int
-	Send(T, int64) error
-	// Broadcast send the given byte message to everyone else in the network
-	Broadcast(T) error
-	// Receive waits on the channel for a message to arrive. Blocks until a message arrives or
-	// the channel is written to. This allows stopping before receiving a message
-	Receive(context.Context) (T, error)
-	GetID() int64
-	GetSent() []T
-	GetReceived() []T
-}
 type FakeInterface[T any] struct {
 	rcvQueue     chan T
 	sendMsg      func(T, int64) error

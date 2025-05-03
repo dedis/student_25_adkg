@@ -4,52 +4,69 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // FakeNetwork is a structure implementing a network. It connects the interfaces of all nodes. T is the type of the
 // messages
-type FakeNetwork[T any] struct {
-	nodes map[int64]chan T
-	in    chan T
+type FakeNetwork struct {
+	nodes    map[int64]chan []byte
+	delayMap map[int64]time.Duration
+	in       chan []byte
 }
 
-func NewFakeNetwork[T any]() *FakeNetwork[T] {
-	return &FakeNetwork[T]{
-		nodes: make(map[int64]chan T),
-		in:    make(chan T, 500),
+func NewFakeNetwork() *FakeNetwork {
+	return &FakeNetwork{
+		nodes:    make(map[int64]chan []byte),
+		in:       make(chan []byte, 500),
+		delayMap: make(map[int64]time.Duration),
 	}
 }
 
-func (n *FakeNetwork[T]) freshID() int64 {
+// DelayNode adds the given delay to the node when sending a packet.
+// Mimics a node having slow connection
+func (n *FakeNetwork) DelayNode(id int64, delay time.Duration) {
+	n.delayMap[id] = delay
+}
+
+func (n *FakeNetwork) freshID() int64 {
 	return int64(len(n.nodes) + 1)
 }
 
-func (n *FakeNetwork[T]) JoinWithBuffer(size int) *FakeInterface[T] {
-	queue := make(chan T, size)
-	iface := NewFakeInterface[T](queue, n.Send, n.Broadcast, n.freshID())
+func (n *FakeNetwork) JoinWithBuffer(size int) *FakeInterface {
+	queue := make(chan []byte, size)
+	iface := NewFakeInterface(queue, n.Send, n.Broadcast, n.freshID())
 
 	n.nodes[iface.id] = iface.rcvQueue
 
 	return iface
 }
 
-func (n *FakeNetwork[T]) JoinNetwork() *FakeInterface[T] {
+func (n *FakeNetwork) JoinNetwork() *FakeInterface {
 	return n.JoinWithBuffer(100)
 }
 
-func (n *FakeNetwork[T]) Send(msg T, to int64) error {
+func (n *FakeNetwork) Send(msg []byte, from, to int64) error {
 	rcv, ok := n.nodes[to]
 	if !ok {
 		return fmt.Errorf("destination node %d not found", to)
 	}
 	// Put the message in the recipient's receive channel
-	rcv <- msg
+	delay, ok := n.delayMap[from]
+	if ok {
+		go func() {
+			time.Sleep(delay)
+			rcv <- msg
+		}()
+	} else {
+		rcv <- msg
+	}
 	return nil
 }
 
-func (n *FakeNetwork[T]) Broadcast(msg T) error {
+func (n *FakeNetwork) Broadcast(msg []byte, from int64) error {
 	for i := range n.nodes {
-		err := n.Send(msg, i)
+		err := n.Send(msg, from, i)
 		if err != nil {
 			return err
 		}
@@ -58,44 +75,44 @@ func (n *FakeNetwork[T]) Broadcast(msg T) error {
 }
 
 // NetworkInterface represents an interface used by a node to communicate in the network
-type NetworkInterface[T any] interface {
+type NetworkInterface interface {
 	// Send allows to send a byte message to a recipient addressed by an int
-	Send(T, int64) error
+	Send([]byte, int64) error
 	// Broadcast send the given byte message to everyone else in the network
-	Broadcast(T) error
+	Broadcast([]byte) error
 	// Receive waits on the channel for a message to arrive. Blocks until a message arrives or
 	// the channel is written to. This allows stopping before receiving a message
-	Receive(context.Context) (T, error)
+	Receive(context.Context) ([]byte, error)
 	GetID() int64
-	GetSent() []T
-	GetReceived() []T
+	GetSent() [][]byte
+	GetReceived() [][]byte
 }
-type FakeInterface[T any] struct {
-	rcvQueue     chan T
-	sendMsg      func(T, int64) error
-	broadcastMsg func(T) error
+type FakeInterface struct {
+	rcvQueue     chan []byte
+	sendMsg      func([]byte, int64, int64) error
+	broadcastMsg func([]byte, int64) error
 	id           int64
-	received     []T
-	sent         []T
+	received     [][]byte
+	sent         [][]byte
 	sync.RWMutex
 }
 
-func NewFakeInterface[T any](rcv chan T, sendMsg func(T, int64) error,
-	broadcastMsg func(T) error, id int64) *FakeInterface[T] {
-	return &FakeInterface[T]{
+func NewFakeInterface(rcv chan []byte, sendMsg func([]byte, int64, int64) error,
+	broadcastMsg func([]byte, int64) error, id int64) *FakeInterface {
+	return &FakeInterface{
 		rcvQueue:     rcv,
 		sendMsg:      sendMsg,
 		broadcastMsg: broadcastMsg,
 		id:           id,
-		received:     make([]T, 0),
-		sent:         make([]T, 0),
+		received:     make([][]byte, 0),
+		sent:         make([][]byte, 0),
 	}
 }
 
-func (f *FakeInterface[T]) Send(msg T, to int64) error {
+func (f *FakeInterface) Send(msg []byte, to int64) error {
 	f.Lock()
 	defer f.Unlock()
-	err := f.sendMsg(msg, to)
+	err := f.sendMsg(msg, f.id, to)
 	if err != nil {
 		return err
 	}
@@ -103,10 +120,10 @@ func (f *FakeInterface[T]) Send(msg T, to int64) error {
 	return nil
 }
 
-func (f *FakeInterface[T]) Broadcast(msg T) error {
+func (f *FakeInterface) Broadcast(msg []byte) error {
 	f.Lock()
 	defer f.Unlock()
-	err := f.broadcastMsg(msg)
+	err := f.broadcastMsg(msg, f.id)
 	if err != nil {
 		return err
 	}
@@ -114,7 +131,7 @@ func (f *FakeInterface[T]) Broadcast(msg T) error {
 	return nil
 }
 
-func (f *FakeInterface[T]) Receive(ctx context.Context) (T, error) {
+func (f *FakeInterface) Receive(ctx context.Context) ([]byte, error) {
 	select {
 	case msg := <-f.rcvQueue:
 		f.Lock()
@@ -122,22 +139,21 @@ func (f *FakeInterface[T]) Receive(ctx context.Context) (T, error) {
 		f.received = append(f.received, msg)
 		return msg, nil
 	case <-ctx.Done():
-		var msg T
-		return msg, ctx.Err()
+		return nil, ctx.Err()
 	}
 }
 
-func (f *FakeInterface[T]) GetID() int64 {
+func (f *FakeInterface) GetID() int64 {
 	return f.id
 }
 
-func (f *FakeInterface[T]) GetSent() []T {
+func (f *FakeInterface) GetSent() [][]byte {
 	f.RLock()
 	defer f.RUnlock()
 	return f.sent
 }
 
-func (f *FakeInterface[T]) GetReceived() []T {
+func (f *FakeInterface) GetReceived() [][]byte {
 	f.RLock()
 	defer f.RUnlock()
 	return f.received

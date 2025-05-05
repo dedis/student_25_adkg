@@ -12,10 +12,10 @@ import (
 )
 
 type ABAStream struct {
-	Iface networking.NetworkInterface[[]byte]
+	Iface networking.NetworkInterface
 }
 
-func NewABAStream(iface networking.NetworkInterface[[]byte]) *ABAStream {
+func NewABAStream(iface networking.NetworkInterface) *ABAStream {
 	return &ABAStream{
 		Iface: iface,
 	}

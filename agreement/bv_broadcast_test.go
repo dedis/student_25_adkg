@@ -12,7 +12,7 @@ import (
 )
 
 func BVDefaultNetworkSetup() (
-	networkIfaces []networking.NetworkInterface[[]byte],
+	networkIfaces []networking.NetworkInterface,
 	nParticipants int,
 	threshold int,
 	notifyChs []chan struct{},

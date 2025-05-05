@@ -81,7 +81,7 @@ func TestABA_CommonCoin_MockCoin(t *testing.T) {
 }
 
 func TestABA_CommonCoin_Simple(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	ctx, cancel := context.WithCancel(context.Background())
 

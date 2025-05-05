@@ -13,7 +13,7 @@ import (
 )
 
 func SBVDefaultSetup() (
-	networkIfaces []networking.NetworkInterface[[]byte],
+	networkIfaces []networking.NetworkInterface,
 	nParticipants int,
 	threshold int,
 	views [][3]bool,
@@ -180,7 +180,6 @@ func TestABA_SBVBroadcast_SilentThreshold(t *testing.T) {
 //   - view ⊆ bin_values
 //   - values received from n - t distinct senders
 func TestABA_SBVBroadcast_ByzantineAux(t *testing.T) {
-	// network := networking.NewFakeNetwork[[]byte]()
 	network := networking.NewTransportNetwork(udp.NewUDP())
 	ctx, cancel := context.WithCancel(context.Background())
 

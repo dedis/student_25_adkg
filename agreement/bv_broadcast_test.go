@@ -3,7 +3,7 @@ package agreement
 import (
 	"context"
 	"student_25_adkg/networking"
-	"student_25_adkg/transport/tcp"
+	"student_25_adkg/transport/udp"
 	"sync"
 	"testing"
 	"time"
@@ -11,46 +11,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func BVDefaultSetup() (
+func BVDefaultNetworkSetup() (
+	networkIfaces []networking.NetworkInterface[[]byte],
 	nParticipants int,
 	threshold int,
 	notifyChs []chan struct{},
 	abaID string,
 	bvInstances []*BVBroadcast,
+	cancel context.CancelFunc,
 ) {
 	nParticipants = 16
 	threshold = 5
 	notifyChs = make([]chan struct{}, nParticipants)
 	abaID = "bv_test"
 	bvInstances = make([]*BVBroadcast, nParticipants)
-	return
-}
 
-func BVDefaultNetworkSetup() (
-	nParticipants int,
-	threshold int,
-	notifyChs []chan struct{},
-	abaID string,
-	bvInstances []*BVBroadcast,
-	ctx context.Context,
-	cancel context.CancelFunc,
-	agreementID int,
-) {
-	nParticipants = 4
-	threshold = 1
-	notifyChs = make([]chan struct{}, nParticipants)
-	abaID = "bv_test"
-	bvInstances = make([]*BVBroadcast, nParticipants)
+	network := networking.NewTransportNetwork(udp.NewUDP())
 
-	// network := networking.NewFakeNetwork[[]byte]()
-	// network := networking.NewTransportNetwork(udp.NewUDP())
-	network := networking.NewTransportNetwork(tcp.NewTCP())
-
-	ctx, cancel = context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	for i := 0; i < nParticipants; i++ {
 		iface, err := network.JoinNetwork()
-		// require.NoError(t, err)
 		if err != nil {
 			panic(err)
 		}
@@ -61,8 +42,9 @@ func BVDefaultNetworkSetup() (
 			NodeID:        i,
 			BroadcastFn:   abaStream.Broadcast,
 		}
-		abaNode := NewABANode(*nodeConf)
+		abaNode := NewABAService(*nodeConf)
 		abaStream.Listen(ctx, abaNode)
+		networkIfaces = append(networkIfaces, abaStream.Iface)
 		bvInstances[i] = abaNode.BVManager.GetOrCreate(abaID)
 	}
 
@@ -74,7 +56,7 @@ func BVDefaultNetworkSetup() (
 // Getting notification on addition to binValues IS tested.
 func TestABA_BVBroadcast_NotifySimple(t *testing.T) {
 
-	nParticipants, _, notifyChs, abaID, bvInstances, _, cancel, _ := BVDefaultNetworkSetup()
+	networkIfaces, nParticipants, _, notifyChs, abaID, bvInstances, cancel := BVDefaultNetworkSetup()
 	proposalVal := 1
 
 	wg := sync.WaitGroup{}
@@ -101,8 +83,15 @@ func TestABA_BVBroadcast_NotifySimple(t *testing.T) {
 		require.False(t, bvInstances[i].BinValues.AsBools()[0])
 	}
 
-	// TODO check all messages are sent
-
+	// check all messages are received
+	for _, n := range networkIfaces {
+		outs := n.GetReceived()
+		bvMsgs, _, _, _, err := DecodeMessagesByType(outs)
+		if err != nil {
+			panic(err)
+		}
+		require.Equal(t, nParticipants, len(bvMsgs))
+	}
 	cancel()
 }
 
@@ -112,26 +101,7 @@ func TestABA_BVBroadcast_NotifySimple(t *testing.T) {
 // Eventually all binvalues will contain both 0 and 1.
 // Getting notification on addition to binValues IS NOT tested.
 func TestABA_BVBroadcast_TwoValues(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, notifyChs, abaID, bvInstances := BVDefaultSetup()
-
-	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
-		abaStream := NewABAStream(iface)
-		nodeConf := &ABACommonConfig{
-			NParticipants: nParticipants,
-			Threshold:     threshold,
-			NodeID:        i,
-			BroadcastFn:   abaStream.Broadcast,
-		}
-		abaNode := NewABANode(*nodeConf)
-		abaStream.Listen(ctx, abaNode)
-		bvInstances[i] = abaNode.BVManager.GetOrCreate(abaID)
-
-	}
+	_, nParticipants, _, notifyChs, abaID, bvInstances, cancel := BVDefaultNetworkSetup()
 
 	wg := sync.WaitGroup{}
 	wg.Add(nParticipants)
@@ -158,9 +128,6 @@ func TestABA_BVBroadcast_TwoValues(t *testing.T) {
 		require.True(t, bvInstances[i].BinValues.AsBools()[1])
 		require.True(t, bvInstances[i].BinValues.AsBools()[0])
 	}
-
-	// TODO check all messages are sent
-
 	cancel()
 }
 
@@ -168,26 +135,7 @@ func TestABA_BVBroadcast_TwoValues(t *testing.T) {
 // Eventually all binvalues of correct processes will contain 1.
 // Getting notification on addition to binValues IS tested.
 func TestABA_BVBroadcast_TByzantine_Success(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, notifyChs, abaID, bvInstances := BVDefaultSetup()
-
-	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
-		abaStream := NewABAStream(iface)
-		nodeConf := &ABACommonConfig{
-			NParticipants: nParticipants,
-			Threshold:     threshold,
-			NodeID:        i,
-			BroadcastFn:   abaStream.Broadcast,
-		}
-		abaNode := NewABANode(*nodeConf)
-		bvInstances[i] = abaNode.BVManager.GetOrCreate(abaID)
-		abaStream.Listen(ctx, abaNode)
-
-	}
+	_, nParticipants, threshold, notifyChs, abaID, bvInstances, cancel := BVDefaultNetworkSetup()
 
 	correctVal := 1
 	byzVal := 0
@@ -236,8 +184,6 @@ func TestABA_BVBroadcast_TByzantine_Success(t *testing.T) {
 		require.False(t, binValues[0], "Node %d: binValues should not contain 0", pid)
 	}
 
-	// TODO check all messages are sent
-
 	cancel()
 }
 
@@ -245,26 +191,7 @@ func TestABA_BVBroadcast_TByzantine_Success(t *testing.T) {
 // Eventually all binvalues of correct processes should be EMPTY.
 // Getting notification on addition to binValues IS tested.
 func TestABA_BVBroadcast_TByzantine_Fail(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, notifyChs, abaID, bvInstances := BVDefaultSetup()
-
-	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
-		abaStream := NewABAStream(iface)
-		nodeConf := &ABACommonConfig{
-			NParticipants: nParticipants,
-			Threshold:     threshold,
-			NodeID:        i,
-			BroadcastFn:   abaStream.Broadcast,
-		}
-		abaNode := NewABANode(*nodeConf)
-		bvInstances[i] = abaNode.BVManager.GetOrCreate(abaID)
-		abaStream.Listen(ctx, abaNode)
-
-	}
+	_, nParticipants, threshold, notifyChs, abaID, bvInstances, cancel := BVDefaultNetworkSetup()
 
 	byzVal := 0
 
@@ -290,10 +217,6 @@ func TestABA_BVBroadcast_TByzantine_Fail(t *testing.T) {
 
 	// sleep to make sure all communication rounds have finished
 	time.Sleep(time.Millisecond * 15 * time.Duration(nParticipants))
-
-	// TODO check all messages have been sent,
-	// i.e that everyone who had to broadcast has broadcasted and others received.
-	// Worked with another network, now I need to find out how to do it with this one.
 
 	// Verify that all nodes' binValues are empty
 	for _, pid := range byzIds {

@@ -15,8 +15,8 @@ type SBVBroadcast struct {
 	nodeID        int
 	bvManager     *InstanceManager[BVBroadcast, BVBroadcastConfig]
 	broadcast     func(proto.Message) error
-	auxCh         chan struct{} // can be initialized right to size nParticipants
-	received      map[int]int   // 1 value from each node, pid -> binval
+	auxCh         chan struct{}
+	received      map[int]int // 1 value from each node, pid -> binval
 	isActive      bool
 	queuedMsgs    map[*typedefs.AuxMessage]struct{}
 }
@@ -50,7 +50,7 @@ func (s *SBVBroadcast) Propose(sbvID string, binValue int) ([3]bool, [3]bool, er
 	s.mu.Lock()
 	s.isActive = true
 	s.mu.Unlock()
-	// handle aux messages which could not be processed before but were enque
+	// handle aux messages which could not be processed before but were enqueued
 	s.processQueued()
 
 	bvInst := s.bvManager.GetOrCreate(sbvID)
@@ -63,7 +63,7 @@ func (s *SBVBroadcast) Propose(sbvID string, binValue int) ([3]bool, [3]bool, er
 		<-notifyCh
 	}
 
-	// take w (random value) from binvalues and aux it
+	// take w (random value) from binvalues and send it as aux
 	randomBinVal, _ := bvInst.BinValues.RandomValue()
 
 	msg := typedefs.AuxMessage{SourceNode: int32(s.nodeID), BinValue: int32(randomBinVal), RoundId: sbvID}

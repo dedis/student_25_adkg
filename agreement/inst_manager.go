@@ -56,26 +56,3 @@ func (m *InstanceManager[T, C]) UpdateDefaultConfig(newConf *C) {
 	defer m.mu.Unlock()
 	m.defaultConf = newConf
 }
-
-// example with bv_broadcast
-
-// type BVConfig struct {
-// 	RoundID    string
-// 	NodeID     int
-// 	LogEnabled bool
-// }
-
-// defaultConf := BVConfig{
-// 	NodeID:     42,
-// 	LogEnabled: true,
-// }
-
-// manager := NewManager[*BVHandler](defaultConf,
-// 	func(conf BVConfig) *BVHandler {
-// 		return NewBVHandler(conf)
-// 	},
-// 	func(base BVConfig, id string) BVConfig {
-// 		base.RoundID = id
-// 		return base
-// 	},
-// )

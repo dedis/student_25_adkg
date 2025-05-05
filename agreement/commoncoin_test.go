@@ -76,35 +76,9 @@ func TestABA_CommonCoin_MockCoin(t *testing.T) {
 	}
 
 	prevCoinBit := coinSigs[0]
-	for i, _ := range coinCombs {
+	for i := range coinCombs {
 		require.Equal(t, prevCoinBit, coinSigs[i], "reconstructed sigs of all combination are the same")
 	}
-}
-
-// findCombinations generates all combinations of `combSize` indexes from a total of `totalSize`.
-func findCombinations(totalSize, combSize int) [][]int {
-	indexes := make([]int, totalSize)
-	for i := 0; i < totalSize; i++ {
-		indexes[i] = i
-	}
-
-	var combinations [][]int
-	var helper func(start int, current []int)
-	helper = func(start int, current []int) {
-		if len(current) == combSize {
-			combo := make([]int, combSize)
-			copy(combo, current)
-			combinations = append(combinations, combo)
-			return
-		}
-
-		for i := start; i < totalSize; i++ {
-			helper(i+1, append(current, indexes[i]))
-		}
-	}
-
-	helper(0, []int{})
-	return combinations
 }
 
 func TestABA_CommonCoin_Simple(t *testing.T) {
@@ -143,7 +117,7 @@ func TestABA_CommonCoin_Simple(t *testing.T) {
 			PubCommitment: pubPoly,
 			Scheme:        scheme,
 		}
-		abaNode := NewABANode(*nodeConf)
+		abaNode := NewABAService(*nodeConf)
 		coins[i] = abaNode.CCoinManageer.GetOrCreate(abaID)
 		abaStream.Listen(ctx, abaNode)
 	}
@@ -153,7 +127,6 @@ func TestABA_CommonCoin_Simple(t *testing.T) {
 	for pid := range nParticipants {
 		go func(pid int) {
 			defer wg.Done()
-			// coinSigBit, err := coins[pid].Flip(0) // flip takes in round, should be deleted
 			coinSigBit, err := coins[pid].Flip() // flip takes in round, should be deleted
 			require.NoError(t, err)
 			coinSigBits[pid] = coinSigBit
@@ -167,7 +140,9 @@ func TestABA_CommonCoin_Simple(t *testing.T) {
 		require.Equal(t, prevCoinBit, coinSigBits[pid], "Node %d: coind values of all participants are the same", pid)
 	}
 
-	// TODO check all messages are sent
-
 	cancel()
 }
+
+// test ideas from rust:
+// filters_invalid_share
+// too_many_invalid_shares

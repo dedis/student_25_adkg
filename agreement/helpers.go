@@ -22,3 +22,29 @@ func uniqueRandomInts(n, _min, _max int) ([]int, error) {
 
 	return pool[:n], nil
 }
+
+// findCombinations generates all combinations of `combSize` indexes from a total of `totalSize`.
+func findCombinations(totalSize, combSize int) [][]int {
+	indexes := make([]int, totalSize)
+	for i := 0; i < totalSize; i++ {
+		indexes[i] = i
+	}
+
+	var combinations [][]int
+	var helper func(start int, current []int)
+	helper = func(start int, current []int) {
+		if len(current) == combSize {
+			combo := make([]int, combSize)
+			copy(combo, current)
+			combinations = append(combinations, combo)
+			return
+		}
+
+		for i := start; i < totalSize; i++ {
+			helper(i+1, append(current, indexes[i]))
+		}
+	}
+
+	helper(0, []int{})
+	return combinations
+}

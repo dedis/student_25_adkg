@@ -13,14 +13,12 @@ type ABA struct {
 	mu            *sync.RWMutex // to lock received
 	nParticipants int
 	threshold     int
-	est           int // should be 0 or 1, -1 means no estimate
 	round         int
 	broadcast     func(proto.Message) error
 	nodeID        int
 	agreementID   int
-	// queuedMsgs    map[types.AuxSetMessage]struct{}
-	roundManager *InstanceManager[ABARound, ABARoundConfig]
-	isActive     bool
+	roundManager  *InstanceManager[ABARound, ABARoundConfig]
+	isActive      bool
 }
 
 type ABAConfig struct {
@@ -43,7 +41,7 @@ func NewABAFromConf(conf *ABAConfig) *ABA {
 		SBVManager:        *conf.SBVManager,
 		CCoinManageer:     conf.CCoinManageer,
 	}
-	roundManager := NewInstanceManager[ABARound, ABARoundConfig](roundConfig, NewABARoundFromConfig,
+	roundManager := NewInstanceManager(roundConfig, NewABARoundFromConfig,
 		func(base *ABARoundConfig, id string) *ABARoundConfig {
 			var err error
 			base.Round, err = strconv.Atoi(id)
@@ -60,8 +58,7 @@ func NewABAFromConf(conf *ABAConfig) *ABA {
 		broadcast:     conf.BroadcastFn,
 		nodeID:        conf.NodeID,
 		agreementID:   conf.AgreementID,
-		// queuedMsgs:    make(map[types.AuxSetMessage]struct{}),
-		roundManager: roundManager,
+		roundManager:  roundManager,
 	}
 }
 
@@ -69,15 +66,14 @@ type ABARound struct {
 	mu            *sync.RWMutex // to lock received
 	nParticipants int
 	threshold     int
-	est           int // should be 0 or 1, -1 means no estimate
+	est           int // should be 0, 1 or 2 (undecided)
 	round         int
-	views         map[int]*BinSet // round -> stage[0,1,2] -> view
-	binValues     *BinSet         // round -> binvalues
+	views         map[int]*BinSet // stage[0,1,2] -> view
+	binValues     *BinSet         // binvalues
 	broadcast     func(proto.Message) error
-	sbv           *SBVBroadcast
 	nodeID        int
-	received      map[int]*BinSet // bin -> pid
-	auxSetCh      chan struct{}   // round -> chan
+	received      map[int]*BinSet // pid -> binset
+	auxSetCh      chan struct{}   // notify on auxSet msg receival
 	agreementID   int
 	sbvManager    InstanceManager[SBVBroadcast, SBVBroadcastConfig]
 	decidedCh     chan int
@@ -87,7 +83,6 @@ type ABARound struct {
 }
 
 type ABARoundConfig struct {
-	// RoundID           string
 	NParticipants     int
 	Threshold         int
 	NodeID            int
@@ -104,15 +99,15 @@ func NewABARoundFromConfig(conf *ABARoundConfig) *ABARound {
 		mu:            &sync.RWMutex{},
 		nParticipants: conf.NParticipants,
 		threshold:     conf.Threshold,
-		est:           conf.Est,   // No initial estimate
+		est:           conf.Est,   // will be set when the round is started
 		round:         conf.Round, // Start at round 0
 		views:         make(map[int]*BinSet),
 		binValues:     NewBinSet(),
 		broadcast:     conf.BroadcastFn,
 		sbvManager:    conf.SBVManager,
 		nodeID:        conf.NodeID,
-		received:      make(map[int]*BinSet),                   // instantiate for each round as well
-		auxSetCh:      make(chan struct{}, conf.NParticipants), // instantiate with nParticipant for each round
+		received:      make(map[int]*BinSet),
+		auxSetCh:      make(chan struct{}, conf.NParticipants),
 		agreementID:   conf.AgreementObjectID,
 		decidedCh:     make(chan int, 1),
 		queuedMsgs:    make(map[*typedefs.AuxSetMessage]struct{}),
@@ -134,15 +129,16 @@ func (a *ABARound) pidsByBinVals() map[int][]int {
 	return res
 }
 
-// roundID format: string: "ABA" + string(on which node acss do we agree) + "r" + string(roundID)
-
-// return est and nil
-func (a *ABARound) Start(est int) (int, error) {
+// return est, if decided, if used the coin, err
+func (a *ABARound) Start(est int) (int, bool, bool, error) {
 	a.mu.Lock()
 	a.isActive = true
 	a.mu.Unlock()
 
 	a.processQueued()
+
+	hasDecided := false
+	withCoin := false
 
 	a.est = est
 	// SBV_Broadcast(est) SBV_Broadcast Stage[ri, 0](est)
@@ -150,16 +146,16 @@ func (a *ABARound) Start(est int) (int, error) {
 	sbvInst := a.sbvManager.GetOrCreate(curStageRoundID.String())
 	view0, binValues, err := sbvInst.Propose(curStageRoundID.String(), a.est)
 	if err != nil {
-		return a.est, fmt.Errorf("sbv broadcast failed %w", err)
+		return a.est, false, false, fmt.Errorf("sbv broadcast failed %w", err)
 	}
 
 	a.views[0], err = NewBinSet().FromBools(view0)
 	if err != nil {
-		return a.est, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+		return a.est, false, false, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
 	}
 	a.binValues, err = NewBinSet().FromBools(binValues)
 	if err != nil {
-		return a.est, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+		return a.est, false, false, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
 	}
 
 	// broadcast auxset
@@ -170,7 +166,7 @@ func (a *ABARound) Start(est int) (int, error) {
 	}
 	err = a.broadcast(&msg)
 	if err != nil {
-		return a.est, fmt.Errorf("auxset broadcast failed %w", err)
+		return a.est, false, false, fmt.Errorf("auxset broadcast failed %w", err)
 	}
 
 	for {
@@ -179,7 +175,7 @@ func (a *ABARound) Start(est int) (int, error) {
 		if complete {
 			a.views[1], err = NewBinSet().FromBools(view)
 			if err != nil {
-				return a.est, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+				return a.est, false, false, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
 			}
 			break
 		}
@@ -192,55 +188,52 @@ func (a *ABARound) Start(est int) (int, error) {
 	}
 
 	// second SBV broadcast
-
 	curStageRoundID = ABARoundUID{AgreementID: a.agreementID, Round: a.round, Stage: 2}
 	sbvInst = a.sbvManager.GetOrCreate(curStageRoundID.String())
 	view2, _, err := sbvInst.Propose(curStageRoundID.String(), a.est)
 
 	if err != nil {
-		return a.est, fmt.Errorf("sbv broadcast failed %w", err)
+		return a.est, false, false, fmt.Errorf("sbv broadcast failed %w", err)
 	}
 
 	a.views[2], err = NewBinSet().FromBools(view2)
 	if err != nil {
-		return a.est, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+		return a.est, false, false, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
 	}
 
-	coinVal, err := a.CCoinManageer.GetOrCreate(curStageRoundID.String()).Flip()
-	if err != nil {
-		return a.est, fmt.Errorf("failed to flip a coin during aba round %d at node %d, err: %s", a.round, a.nodeID, err.Error())
-	}
+	var coinVal int
 	if a.views[2].Length() == 1 &&
 		!a.views[2].ContainsUndecided() {
 		a.est = a.views[2].AsInts()[0]
-		// TODO decide(v) if not yet done, for now just log
-		// So decide != return and this thing keeps spinning? Like forever? Yes, a channel
-		a.decidedCh <- a.est
+		hasDecided = true
 		logger.Debug().Msgf("DECIDED %d at round %d node %d", a.est, a.round, a.nodeID)
-	} else if a.views[2].Length() == 2 &&
+	} else {
+		coinVal, err = a.CCoinManageer.GetOrCreate(curStageRoundID.String()).Flip()
+		if err != nil {
+			return a.est, false, false, fmt.Errorf("failed to flip a coin during aba round %d at node %d, err: %s", a.round, a.nodeID, err.Error())
+		}
+	}
+	if a.views[2].Length() == 2 &&
 		a.views[2].ContainsUndecided() {
 		if a.views[2].ContainsZero() {
 			a.est = Zero
 		} else if a.views[2].ContainsOne() {
 			a.est = One
 		}
-		// a.est = a.views[a.round][2].AsInts()[0] // 0 or 1
 	} else if a.views[2].ContainsUndecided() {
 		logger.Debug().Msgf("DECIDED WITH COIN: Est %d, coinval %d at round %d node %d", a.est, coinVal, a.round, a.nodeID)
+		hasDecided = true
+		withCoin = true
 		a.est = coinVal
 	}
 
-	logger.Info().Msgf("humus node %d decided", a.nodeID)
-	close(a.decidedCh)
 	a.mu.Lock()
 	a.isActive = false
 	a.mu.Unlock()
-	return a.est, nil
+	return a.est, hasDecided, withCoin, nil
 }
 
 func (a *ABARound) HandleMessage(msg *typedefs.AuxSetMessage) error {
-	// should not happen,
-	// instead should go into the queue
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.isActive {
@@ -281,25 +274,29 @@ func (a *ABARound) processQueued() {
 	}
 }
 
-func (a *ABA) Propose(binValue int) (int, error) {
+func (a *ABA) Propose(est int) (int, error) {
 	a.mu.Lock()
 	a.isActive = true
 	a.mu.Unlock()
-	est := binValue
 	var binVal int
 	for {
 		a.mu.Lock()
 		a.round++
 		abaRoundInst := a.roundManager.GetOrCreate(strconv.Itoa(a.round))
 		a.mu.Unlock()
-		est, _ = abaRoundInst.Start(est)
-		v, ok := <-abaRoundInst.decidedCh
-		if !ok {
+		roundEst, decided, withCoin, err := abaRoundInst.Start(est)
+		if err != nil {
+			logger.Error().Msgf("aba %d failed at node %d", a.agreementID, a.nodeID)
+			return 0, err
+		}
+
+		if !decided || (decided && withCoin) {
+			est = roundEst
 			continue
 		}
-		binVal = v
+
+		binVal = roundEst
 		break
-		//  spinning further does not make sense, right?
 	}
 
 	return binVal, nil
@@ -326,7 +323,7 @@ func (a *ABA) HandleMessage(m *typedefs.AuxSetMessage) error {
 	}
 
 	if a.round < abaInstStageRoundID.Round {
-		logger.Debug().Msgf("aba number %d has not yet been started at node %d",
+		logger.Debug().Msgf("aba on %d has not yet been started at node %d",
 			abaInstStageRoundID.AgreementID, a.nodeID)
 		return nil
 	}

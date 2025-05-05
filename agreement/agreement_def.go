@@ -1,0 +1,80 @@
+package agreement
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"go.dedis.ch/kyber/v4/share"
+	"go.dedis.ch/kyber/v4/sign"
+	"google.golang.org/protobuf/proto"
+)
+
+const (
+	Zero = iota
+	One
+	UndecidedBinVal
+)
+
+type ABACommonConfig struct {
+	NParticipants int
+	Threshold     int
+	NodeID        int
+	BroadcastFn   func(proto.Message) error
+
+	// crypto needed for common coin
+	LocalShare    *share.PriShare
+	PubCommitment *share.PubPoly
+	Scheme        sign.ThresholdScheme
+}
+
+type ABARoundUID struct {
+	AgreementID int
+	Round       int
+	Stage       int
+	Prefix      string
+}
+
+func (id ABARoundUID) String() string {
+	return fmt.Sprintf("ABAp%son%dr%ds%d", id.Prefix, id.AgreementID, id.Round, id.Stage)
+}
+
+// prefix is an ID of ADKG (to manage multiple MVBAs), not currently used.
+func ABARoundUIDFromString(s string) (ABARoundUID, error) {
+	// Expected format: "ABAp<prefix>on<AgreementID>r<Round>s<Stage>"
+	if !strings.HasPrefix(s, "ABAp") {
+		return ABARoundUID{}, fmt.Errorf("invalid format: missing 'ABAp' prefix")
+	}
+	s = strings.TrimPrefix(s, "ABAp")
+	prefixAndRest := strings.SplitN(s, "on", 2)
+	if len(prefixAndRest) != 2 {
+		return ABARoundUID{}, fmt.Errorf("invalid format: expected 'on' separator")
+	}
+	prefix := prefixAndRest[0]
+	parts := strings.Split(prefixAndRest[1], "r")
+	if len(parts) != 2 {
+		return ABARoundUID{}, fmt.Errorf("invalid format: expected 'r' separator")
+	}
+	agreementID, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return ABARoundUID{}, fmt.Errorf("invalid AgreementID: %w", err)
+	}
+	roundAndStage := strings.Split(parts[1], "s")
+	if len(roundAndStage) != 2 {
+		return ABARoundUID{}, fmt.Errorf("invalid format: expected 's' separator")
+	}
+	round, err := strconv.Atoi(roundAndStage[0])
+	if err != nil {
+		return ABARoundUID{}, fmt.Errorf("invalid Round: %w", err)
+	}
+	stage, err := strconv.Atoi(roundAndStage[1])
+	if err != nil {
+		return ABARoundUID{}, fmt.Errorf("invalid Stage: %w", err)
+	}
+	return ABARoundUID{
+		AgreementID: agreementID,
+		Round:       round,
+		Stage:       stage,
+		Prefix:      prefix,
+	}, nil
+}

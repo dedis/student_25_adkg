@@ -21,15 +21,11 @@ type ABACommonConfig struct {
 	Threshold     int
 	NodeID        int
 	BroadcastFn   func(proto.Message) error
+
+	// crypto needed for common coin
 	LocalShare    *share.PriShare
 	PubCommitment *share.PubPoly
 	Scheme        sign.ThresholdScheme
-}
-
-func (conf *ABACommonConfig) CopySetNodeID(nodeID int) ABACommonConfig {
-	newConf := *conf
-	newConf.NodeID = nodeID
-	return newConf
 }
 
 type ABARoundUID struct {
@@ -43,6 +39,7 @@ func (id ABARoundUID) String() string {
 	return fmt.Sprintf("ABAp%son%dr%ds%d", id.Prefix, id.AgreementID, id.Round, id.Stage)
 }
 
+// prefix is an ID of ADKG (to manage multiple MVBAs), not currently used.
 func ABARoundUIDFromString(s string) (ABARoundUID, error) {
 	// Expected format: "ABAp<prefix>on<AgreementID>r<Round>s<Stage>"
 	if !strings.HasPrefix(s, "ABAp") {

@@ -3,43 +3,40 @@ package agreement
 import (
 	"context"
 	"student_25_adkg/networking"
+	"student_25_adkg/transport/udp"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
 
 func SBVDefaultSetup() (
+	networkIfaces []networking.NetworkInterface[[]byte],
 	nParticipants int,
 	threshold int,
 	views [][3]bool,
 	binValues [][3]bool,
 	abaID string,
 	sbvInstances []*SBVBroadcast,
+	cancel context.CancelFunc,
 ) {
-	nParticipants = 4
-	threshold = 1
+	network := networking.NewTransportNetwork(udp.NewUDP())
+	ctx, cancel := context.WithCancel(context.Background())
+
+	nParticipants = 16
+	threshold = 5
 	views = make([][3]bool, nParticipants)
 	binValues = make([][3]bool, nParticipants)
 	abaID = "sbv_test"
 	sbvInstances = make([]*SBVBroadcast, nParticipants)
-	return
-}
-
-// Assume 3t+1 correct processes. Everyone broadcasts 1.
-// Eventually all binvalues will contain 1.
-// Getting notification on addition to binValues IS tested.
-func TestABA_SBVBroadcast_Simple(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, views, binValues, abaID, sbvInstances := SBVDefaultSetup()
-	proposalVal := 1
 
 	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
+		iface, err := network.JoinNetwork()
+		if err != nil {
+			panic(err)
+		}
 		abaStream := NewABAStream(iface)
 		nodeConf := &ABACommonConfig{
 			NParticipants: nParticipants,
@@ -47,11 +44,21 @@ func TestABA_SBVBroadcast_Simple(t *testing.T) {
 			NodeID:        i,
 			BroadcastFn:   abaStream.Broadcast,
 		}
-		abaNode := NewABANode(*nodeConf)
+		abaNode := NewABAService(*nodeConf)
 		abaStream.Listen(ctx, abaNode)
+		networkIfaces = append(networkIfaces, abaStream.Iface)
 		sbvInstances[i] = abaNode.SBVManager.GetOrCreate(abaID)
-
 	}
+
+	return
+}
+
+// Assume 3t+1 correct processes. Everyone broadcasts 1.
+// Eventually all binvalues will contain 1.
+func TestABA_SBVBroadcast_Simple(t *testing.T) {
+
+	netIfaces, nParticipants, _, views, binValues, abaID, sbvInstances, cancel := SBVDefaultSetup()
+	proposalVal := 1
 
 	wg := sync.WaitGroup{}
 	wg.Add(nParticipants)
@@ -75,7 +82,18 @@ func TestABA_SBVBroadcast_Simple(t *testing.T) {
 		require.True(t, views[i][1], "Node %d: view should contain 1", i)
 		require.False(t, views[i][0], "Node %d: view should not contain 0", i)
 	}
-	// TODO check all messages are sent
+
+	time.Sleep(time.Millisecond * 15 * time.Duration(nParticipants))
+	// check all messages are received
+	for _, n := range netIfaces {
+		outs := n.GetReceived()
+		bvMsgs, auxMessages, _, _, err := DecodeMessagesByType(outs)
+		if err != nil {
+			panic(err)
+		}
+		require.Equal(t, nParticipants, len(auxMessages))
+		require.Equal(t, nParticipants, len(bvMsgs))
+	}
 
 	cancel()
 }
@@ -86,26 +104,7 @@ func TestABA_SBVBroadcast_Simple(t *testing.T) {
 //   - Honest processes may see bin_values = {0, 1}
 //   - Key test: make sure they don’t return early until the AUX predicate is satisfied
 func TestABA_SBVBroadcast_TwoValues(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, views, binValues, abaID, sbvInstances := SBVDefaultSetup()
-
-	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
-		abaStream := NewABAStream(iface)
-		nodeConf := &ABACommonConfig{
-			NParticipants: nParticipants,
-			Threshold:     threshold,
-			NodeID:        i,
-			BroadcastFn:   abaStream.Broadcast,
-		}
-		abaNode := NewABANode(*nodeConf)
-		abaStream.Listen(ctx, abaNode)
-		sbvInstances[i] = abaNode.SBVManager.GetOrCreate(abaID)
-
-	}
+	_, nParticipants, _, views, binValues, abaID, sbvInstances, cancel := SBVDefaultSetup()
 
 	wg := sync.WaitGroup{}
 	wg.Add(nParticipants)
@@ -129,7 +128,6 @@ func TestABA_SBVBroadcast_TwoValues(t *testing.T) {
 		require.True(t, views[i][0] || views[i][1], "Node %d: view could contain 0 or 1 or both", i)
 		require.False(t, views[i][2] || binValues[i][2], "Node %d: neither view nor binValues should not contain nonbinary values", i)
 	}
-	// TODO check all messages are sent
 
 	cancel()
 }
@@ -145,27 +143,8 @@ func TestABA_SBVBroadcast_TwoValues(t *testing.T) {
 // The process who has never started SBV (broadcasted, not just listening) will never broadcast aux.
 // Looks correct according to pseudocode from the paper.
 func TestABA_SBVBroadcast_SilentThreshold(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	nParticipants, threshold, views, binValues, abaID, sbvInstances := SBVDefaultSetup()
+	_, nParticipants, threshold, views, binValues, abaID, sbvInstances, cancel := SBVDefaultSetup()
 	proposalVal := 1
-
-	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
-		abaStream := NewABAStream(iface)
-		nodeConf := &ABACommonConfig{
-			NParticipants: nParticipants,
-			Threshold:     threshold,
-			NodeID:        i,
-			BroadcastFn:   abaStream.Broadcast,
-		}
-		abaNode := NewABANode(*nodeConf)
-		abaStream.Listen(ctx, abaNode)
-		sbvInstances[i] = abaNode.SBVManager.GetOrCreate(abaID)
-
-	}
 
 	correctIDs, err := uniqueRandomInts(threshold*2+1, 0, nParticipants)
 	require.NoError(t, err)
@@ -191,7 +170,6 @@ func TestABA_SBVBroadcast_SilentThreshold(t *testing.T) {
 		require.True(t, !views[pid][0] && views[pid][1] && !views[pid][2], "Node %d: view should only contain 1", pid)
 	}
 
-	// TODO verify that the number of incoming aux messages is correct
 	cancel()
 }
 
@@ -202,11 +180,16 @@ func TestABA_SBVBroadcast_SilentThreshold(t *testing.T) {
 //   - view ⊆ bin_values
 //   - values received from n - t distinct senders
 func TestABA_SBVBroadcast_ByzantineAux(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
-
+	// network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewTransportNetwork(udp.NewUDP())
 	ctx, cancel := context.WithCancel(context.Background())
 
-	nParticipants, threshold, views, binValues, abaID, sbvInstances := SBVDefaultSetup()
+	nParticipants := 4
+	threshold := 1
+	views := make([][3]bool, nParticipants)
+	binValues := make([][3]bool, nParticipants)
+	abaID := "sbv_test"
+	sbvInstances := make([]*SBVBroadcast, nParticipants)
 	proposalVal := 1
 
 	destNodes := make([]int, nParticipants)
@@ -214,7 +197,10 @@ func TestABA_SBVBroadcast_ByzantineAux(t *testing.T) {
 		destNodes[i] = i + 1
 	}
 	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
+		iface, err := network.JoinNetwork()
+		if err != nil {
+			panic(err)
+		}
 		abaStream := NewABAStream(iface)
 
 		var broadcastFn func(msg proto.Message) error
@@ -229,7 +215,7 @@ func TestABA_SBVBroadcast_ByzantineAux(t *testing.T) {
 			NodeID:        i,
 			BroadcastFn:   broadcastFn,
 		}
-		abaNode := NewABANode(*nodeConf)
+		abaNode := NewABAService(*nodeConf)
 		abaStream.Listen(ctx, abaNode)
 		sbvInstances[i] = abaNode.SBVManager.GetOrCreate(abaID)
 
@@ -257,7 +243,6 @@ func TestABA_SBVBroadcast_ByzantineAux(t *testing.T) {
 		require.True(t, views[i][1], "Node %d: view should contain 1", i)
 		require.False(t, views[i][0], "Node %d: view should not contain 0", i)
 	}
-	// TODO check all messages are sent
 
 	cancel()
 }

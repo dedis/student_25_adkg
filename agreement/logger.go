@@ -11,8 +11,6 @@ import (
 // level.
 const EnvLogLevel = "GLOG"
 
-// what is nolevel
-// const defaultLevel = zerolog.NoLevel
 const defaultLevel = zerolog.Disabled
 
 func init() {

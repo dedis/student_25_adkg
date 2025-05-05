@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"student_25_adkg/networking"
 	"student_25_adkg/transport/disrupted"
-	"student_25_adkg/transport/tcp"
 	"student_25_adkg/transport/udp"
 	"sync"
 	"testing"
@@ -19,7 +18,7 @@ import (
 	"go.dedis.ch/kyber/v4/xof/blake2xb"
 )
 
-func ABADefaultSetup() (
+func ABADefaultSetup(network *networking.TransportNetwork) (
 	nParticipants int,
 	threshold int,
 	abaInstances []*ABA,
@@ -28,18 +27,11 @@ func ABADefaultSetup() (
 	cancel context.CancelFunc,
 	agreementID int,
 ) {
-	nParticipants = 10
-	threshold = 3
+	nParticipants = 16
+	threshold = 5
 	agreementID = 1
 	abaInstances = make([]*ABA, nParticipants)
 	decidedVals = make([]int, nParticipants)
-
-	// network := networking.NewFakeNetwork[[]byte]()
-	// network := networking.NewTransportNetwork(udp.NewUDP())
-	// network := networking.NewTransportNetwork(disrupted.NewDisrupted(udp.NewUDP(), disrupted.WithFixedDelay(500*time.Millisecond)))
-	// network := networking.NewTransportNetwork(disrupted.NewDisrupted(udp.NewUDP(), disrupted.WithJam(time.Second, 16)))
-	network := networking.NewTransportNetwork(disrupted.NewDisrupted(tcp.NewTCP(), disrupted.WithFixedDelay(500*time.Millisecond)))
-	// network := networking.NewTransportNetwork(disrupted.NewDisrupted(tcp.NewTCP(), disrupted.WithJam(time.Second, 16)))
 
 	ctx, cancel = context.WithCancel(context.Background())
 
@@ -55,7 +47,6 @@ func ABADefaultSetup() (
 	priShares := priPoly.Shares(nParticipants)
 
 	for i := 0; i < nParticipants; i++ {
-		// iface := network.JoinNetwork()
 		iface, err := network.JoinNetwork()
 		if err != nil {
 			panic(err)
@@ -71,7 +62,7 @@ func ABADefaultSetup() (
 			LocalShare:    priShares[i],
 			PubCommitment: pubPoly,
 		}
-		abaNode := NewABANode(*nodeConf)
+		abaNode := NewABAService(*nodeConf)
 		abaStream.Listen(ctx, abaNode)
 		abaInstances[i] = abaNode.ABAManager.GetOrCreate(strconv.Itoa(agreementID))
 	}
@@ -93,11 +84,7 @@ func ABAsMultipleSetup(agreementIDs []int) (
 		abaInstances[pid] = make(map[int]*ABA)
 	}
 	decidedVals = make([]int, nParticipants)
-
-	// network := networking.NewFakeNetwork[[]byte]()
 	network := networking.NewTransportNetwork(udp.NewUDP())
-	// network := networking.NewTransportNetwork(disrupted.NewDisrupted(udp.NewUDP(), disrupted.WithFixedDelay(500*time.Millisecond)))
-	// network := networking.NewTransportNetwork(disrupted.NewDisrupted(udp.NewUDP(), disrupted.WithJam(time.Second, 16)))
 
 	ctx, cancel = context.WithCancel(context.Background())
 
@@ -113,7 +100,6 @@ func ABAsMultipleSetup(agreementIDs []int) (
 	priShares := priPoly.Shares(nParticipants)
 
 	for i := 0; i < nParticipants; i++ {
-		// iface := network.JoinNetwork()
 		iface, err := network.JoinNetwork()
 		if err != nil {
 			panic(err)
@@ -129,7 +115,7 @@ func ABAsMultipleSetup(agreementIDs []int) (
 			LocalShare:    priShares[i],
 			PubCommitment: pubPoly,
 		}
-		abaNode := NewABANode(*nodeConf)
+		abaNode := NewABAService(*nodeConf)
 		abaStream.Listen(ctx, abaNode)
 		for _, agrID := range agreementIDs {
 			abaInstances[i][agrID] = abaNode.ABAManager.GetOrCreate(strconv.Itoa(agrID))
@@ -142,7 +128,8 @@ func ABAsMultipleSetup(agreementIDs []int) (
 // Eventually everyone should decide 1.
 func TestABA_Simple(t *testing.T) {
 
-	nParticipants, _, abaInstances, decidedVals, _, cancel, _ := ABADefaultSetup()
+	network := networking.NewTransportNetwork(udp.NewUDP())
+	nParticipants, _, abaInstances, decidedVals, _, cancel, _ := ABADefaultSetup(network)
 
 	proposalVal := 1
 	wg := sync.WaitGroup{}
@@ -163,19 +150,20 @@ func TestABA_Simple(t *testing.T) {
 	for i := 0; i < nParticipants; i++ {
 		require.Equal(t, proposalVal, decidedVals[i], "Node %d should have decided %a", i, proposalVal)
 	}
-	// TODO check all messages are sent
 
 	cancel()
 }
 
-// Assume 3t+1 correct processes. Everyone broadcasts 1.
+// Assume 3t+1 correct processes.
 // Nodes with even index broadcast 0, nodes with odd index broadcast 1.
-// Nodes can't decide -> evoke a coin.
-// !!! Now can only see it in the logs.
-// ❯ GLOG=debug go test -run TestABA_WithCoin  -v -race  -count 1
+// Nodes can't decide -> toss a coin.
+// The test checks all ABA decided the same value.
+// !!! Coin toss can not be guarantied but if it happens it is present in the logs.
+// GLOG=debug go test -run TestABA_WithCoin  -v -race  -count 1
 func TestABA_WithCoin(t *testing.T) {
 
-	nParticipants, _, abaInstances, decidedVals, _, cancel, _ := ABADefaultSetup()
+	network := networking.NewTransportNetwork(udp.NewUDP())
+	nParticipants, _, abaInstances, decidedVals, _, cancel, _ := ABADefaultSetup(network)
 
 	wg := sync.WaitGroup{}
 	wg.Add(nParticipants)
@@ -191,14 +179,21 @@ func TestABA_WithCoin(t *testing.T) {
 
 	// Wait for aba to complete at each node
 	wg.Wait()
-	// TODO check all messages are sent
+
+	// check that all nodes decided the same value (coin or not coin)
+	decidedVal := decidedVals[0]
+	for i := 1; i < nParticipants; i++ {
+		require.Equal(t, decidedVal, decidedVals[i], "Node %d should have decided %a", i, decidedVal)
+		decidedVal = decidedVals[i]
+	}
 
 	cancel()
 }
 
+// Run multiple ABAs at the same time.
+// Make sure they all decide correct value.
 func TestABA_Multiple_Simple(t *testing.T) {
 	agreementIDs := []int{1, 2, 3}
-
 	nParticipants, _, abaInstances, decidedVals, _, cancel := ABAsMultipleSetup(agreementIDs)
 
 	proposalVal := 1
@@ -218,17 +213,53 @@ func TestABA_Multiple_Simple(t *testing.T) {
 	// Wait for aba to complete at each node
 	wg.Wait()
 
-	// Verify that all nodes' decided the correct value
+	// Verify that all nodes' decided the correct value for each aba
 	for i := 0; i < nParticipants; i++ {
 		require.Equal(t, proposalVal, decidedVals[i], "Node %d should have decided %a", i, proposalVal)
 	}
-	// TODO check all messages are sent
 
 	cancel()
 }
 
-// WithPayloadRandomizer
-// WithPacketIDRandomizer not applicable
-// WithSourceSpoofer
-// WithGenericDelay
-// WithLossSocket
+func TestABA_WithCoin_Disrupted(t *testing.T) {
+	getTestDisrupted := func(disruptedLayer *disrupted.Transport) func(*testing.T) {
+		disruptedLayer.SetRandomGenSeed(1)
+		return func(t *testing.T) {
+
+			network := networking.NewTransportNetwork(disruptedLayer)
+			nParticipants, _, abaInstances, decidedVals, _, cancel, _ := ABADefaultSetup(network)
+
+			wg := sync.WaitGroup{}
+			wg.Add(nParticipants)
+			for i := 0; i < nParticipants; i++ {
+				go func(pid int) {
+					defer wg.Done()
+					var err error
+					proposalVal := i % 2
+					decidedVals[i], err = abaInstances[pid].Propose(proposalVal)
+					require.NoError(t, err)
+				}(i)
+			}
+
+			// Wait for aba to complete at each node
+			wg.Wait()
+
+			// check that all nodes decided the same value (coin or not coin)
+			decidedVal := decidedVals[0]
+			for i := 1; i < nParticipants; i++ {
+				require.Equal(t, decidedVal, decidedVals[i], "Node %d should have decided %a", i, decidedVal)
+				decidedVal = decidedVals[i]
+			}
+
+			cancel()
+		}
+	}
+	t.Run("UDP transport with a normal bridge node",
+		getTestDisrupted(disrupted.NewDisrupted(udp.NewUDP())))
+	t.Run("UDP transport with a slightly jammed bridge node",
+		getTestDisrupted(disrupted.NewDisrupted(udp.NewUDP(), disrupted.WithJam(1*time.Second, 2))))
+	t.Run("UDP transport with a heavily jammed bridge node",
+		getTestDisrupted(disrupted.NewDisrupted(udp.NewUDP(), disrupted.WithJam(2*time.Second, 10))))
+	t.Run("UDP transport with a single delayed node",
+		getTestDisrupted(disrupted.NewDisrupted(udp.NewUDP(), disrupted.WithFixedDelay(500*time.Millisecond))))
+}

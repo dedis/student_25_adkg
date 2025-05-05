@@ -2,14 +2,15 @@ package networking
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Simple test to ensure a node joining works correctly
 func Test_fake_network_join(t *testing.T) {
-	network := NewFakeNetwork[[]byte]()
+	network := NewFakeNetwork()
 
 	nbNodes := 10
 	expSize := 0
@@ -26,7 +27,7 @@ func Test_fake_network_join(t *testing.T) {
 
 // Test that sending and receiving a message between two nodes works
 func Test_fake_network_Send_Receive(t *testing.T) {
-	network := NewFakeNetwork[[]byte]()
+	network := NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	n1 := network.JoinNetwork()
@@ -46,11 +47,11 @@ func Test_fake_network_Send_Receive(t *testing.T) {
 
 // Test a broadcast works correctly
 func Test_fake_network_Send_Broadcast(t *testing.T) {
-	network := NewFakeNetwork[[]byte]()
+	network := NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 	nbNodes := 10
 
-	nodes := make([]*FakeInterface[[]byte], nbNodes)
+	nodes := make([]*FakeInterface, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		node := network.JoinNetwork()
 		nodes[i] = node

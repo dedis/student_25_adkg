@@ -2,7 +2,6 @@ package agreement
 
 import (
 	"context"
-	"fmt"
 	"student_25_adkg/networking"
 	"sync"
 	"testing"
@@ -28,7 +27,7 @@ func TestABA_CommonCoin_MockCoin(t *testing.T) {
 	coinSigs := [][]byte{}
 
 	COIN_MSG := "Common coin msg"
-	seedBytes := []byte(fmt.Sprintf("Hello Common Coin"))
+	seedBytes := []byte("Hello Common Coin")
 	stream := blake2xb.New(seedBytes)
 	suite := bn256.NewSuiteRand(stream)
 	scheme := tbls.NewThresholdSchemeOnG1(suite)
@@ -39,7 +38,7 @@ func TestABA_CommonCoin_MockCoin(t *testing.T) {
 
 	coins := make([]*TestCoin, nParticipants)
 	for i, share := range priPoly.Shares(nParticipants) {
-		localSeedBytes := []byte(fmt.Sprintf("Hello Common Coin"))
+		localSeedBytes := []byte("Hello Common Coin")
 		localStream := blake2xb.New(localSeedBytes)
 		localSuite := bn256.NewSuiteRand(localStream)
 		localScheme := tbls.NewThresholdSchemeOnG1(localSuite)
@@ -94,7 +93,7 @@ func TestABA_CommonCoin_Simple(t *testing.T) {
 	coins := make([]*CommonCoin, nParticipants)
 
 	// localShare share.PriShare, pubCommitment *share.PubPoly for each coin
-	seedBytes := []byte(fmt.Sprintf("Hello Common Coin {}"))
+	seedBytes := []byte("Hello Common Coin {}")
 	stream := blake2xb.New(seedBytes)
 	suite := bn256.NewSuiteRand(stream)
 	scheme := tbls.NewThresholdSchemeOnG1(suite)

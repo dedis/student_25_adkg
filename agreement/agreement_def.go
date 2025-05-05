@@ -57,7 +57,7 @@ func ABARoundUIDFromString(s string) (ABARoundUID, error) {
 	}
 	agreementID, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return ABARoundUID{}, fmt.Errorf("invalid AgreementID: %v", err)
+		return ABARoundUID{}, fmt.Errorf("invalid AgreementID: %w", err)
 	}
 	roundAndStage := strings.Split(parts[1], "s")
 	if len(roundAndStage) != 2 {
@@ -65,11 +65,11 @@ func ABARoundUIDFromString(s string) (ABARoundUID, error) {
 	}
 	round, err := strconv.Atoi(roundAndStage[0])
 	if err != nil {
-		return ABARoundUID{}, fmt.Errorf("invalid Round: %v", err)
+		return ABARoundUID{}, fmt.Errorf("invalid Round: %w", err)
 	}
 	stage, err := strconv.Atoi(roundAndStage[1])
 	if err != nil {
-		return ABARoundUID{}, fmt.Errorf("invalid Stage: %v", err)
+		return ABARoundUID{}, fmt.Errorf("invalid Stage: %w", err)
 	}
 	return ABARoundUID{
 		AgreementID: agreementID,

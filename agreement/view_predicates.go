@@ -114,33 +114,34 @@ func AuxViewPredicateOneVal(s BinValsReceiver, n int, t int, binVal int) (bool, 
 	return false, [3]bool{}
 }
 func AuxViewPredicateTwoVals(s BinValsReceiver, n int, t int, binVal1, binVal2 int) (bool, [3]bool) {
-	if len(s.Received()) >= (n - t) {
-		nVals1 := 0
-		nVals2 := 0
-		for _, binval := range s.Received() {
-			if binval == binVal1 {
-				nVals1++
-			} else if binval == binVal2 {
-				nVals2++
-			}
-		}
-		if nVals1+nVals2 < n-t {
-			// some garbage values among received
-			return false, [3]bool{}
-		}
+	if len(s.Received()) < (n - t) {
+		return false, [3]bool{}
 
-		view := [3]bool{}
-		predTrue := false
-		if nVals1 > 0 {
-			view[binVal1] = true
-			predTrue = true
-		}
-		if nVals2 > 0 {
-			view[binVal2] = true
-			predTrue = true
-		}
-
-		return predTrue, view
 	}
-	return false, [3]bool{}
+
+	nVals1 := 0
+	nVals2 := 0
+	for _, binval := range s.Received() {
+		if binval == binVal1 {
+			nVals1++
+		} else if binval == binVal2 {
+			nVals2++
+		}
+	}
+	if nVals1+nVals2 < n-t {
+		// some garbage values among received
+		return false, [3]bool{}
+	}
+
+	view := [3]bool{}
+	predTrue := false
+	if nVals1 > 0 {
+		view[binVal1] = true
+		predTrue = true
+	}
+	if nVals2 > 0 {
+		view[binVal2] = true
+		predTrue = true
+	}
+	return predTrue, view
 }

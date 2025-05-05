@@ -21,18 +21,18 @@ func NewABAStream(iface networking.NetworkInterface) *ABAStream {
 	}
 }
 
-func (abas *ABAStream) Broadcast(msg proto.Message) error {
+func (stream *ABAStream) Broadcast(msg proto.Message) error {
 	bs, err := EncodeABAMessage(msg)
 	if err != nil {
 		return err
 	}
-	err = abas.Iface.Broadcast(bs)
+	err = stream.Iface.Broadcast(bs)
 	return err
 }
 
 // A hacky testing function to simulate byzantine behaviour of sbv broadcast.
 // Make sbv broadcast send different values in aux to different participants.
-func (abas *ABAStream) RandomSBVBroadcast(destNodes []int) func(msg proto.Message) error {
+func (stream *ABAStream) RandomSBVBroadcast(destNodes []int) func(msg proto.Message) error {
 	return func(msg proto.Message) error {
 		for _, pid := range destNodes {
 			auxMsg, ok := msg.(*typedefs.AuxMessage)
@@ -43,7 +43,7 @@ func (abas *ABAStream) RandomSBVBroadcast(destNodes []int) func(msg proto.Messag
 				if err != nil {
 					return err
 				}
-				err = abas.Iface.Send(bs, int64(pid))
+				err = stream.Iface.Send(bs, int64(pid))
 				return err
 			}
 			bvMsg, ok := msg.(*typedefs.BVMessage)
@@ -54,7 +54,7 @@ func (abas *ABAStream) RandomSBVBroadcast(destNodes []int) func(msg proto.Messag
 			if err != nil {
 				return err
 			}
-			err = abas.Iface.Send(bs, int64(pid))
+			err = stream.Iface.Send(bs, int64(pid))
 			if err != nil {
 				return err
 			}
@@ -63,48 +63,46 @@ func (abas *ABAStream) RandomSBVBroadcast(destNodes []int) func(msg proto.Messag
 	}
 }
 
-func (abas *ABAStream) Listen(ctx context.Context, node *ABAService) {
+func (stream *ABAStream) Listen(ctx context.Context, node *ABAService) {
 	go func() {
 		for {
-			bs, err := abas.Iface.Receive(ctx)
-			if err != nil {
+			if err := stream.handleNextMessage(ctx, node); err != nil {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
 				panic(err)
 			}
-
-			var env typedefs.ABAEnvelope
-			if err := proto.Unmarshal(bs, &env); err != nil {
-				panic(fmt.Errorf("failed to unmarshal ABAEnvelope: %w", err))
-			}
-
-			switch m := env.Msg.(type) {
-			case *typedefs.ABAEnvelope_BvMsg:
-				err := node.HandleBVMessage(m)
-				if err != nil {
-					panic(err)
-				}
-			case *typedefs.ABAEnvelope_AuxMsg:
-				err := node.HandleAuxMessage(m)
-				if err != nil {
-					panic(err)
-				}
-			case *typedefs.ABAEnvelope_AuxSetMsg:
-				err := node.HandleAuxSetMessage(m)
-				if err != nil {
-					panic(err)
-				}
-			case *typedefs.ABAEnvelope_CoinMsg:
-				err := node.HandleCoinMessage(m)
-				if err != nil {
-					panic(err)
-				}
-			default:
-				panic(fmt.Errorf("unknown ABAEnvelope message type"))
-			}
 		}
 	}()
+}
+
+func (stream *ABAStream) handleNextMessage(ctx context.Context, node *ABAService) error {
+	bs, err := stream.Iface.Receive(ctx)
+	if err != nil {
+		return err
+	}
+
+	var env typedefs.ABAEnvelope
+	if err := proto.Unmarshal(bs, &env); err != nil {
+		return fmt.Errorf("failed to unmarshal ABAEnvelope: %w", err)
+	}
+
+	return node.HandleABAMessage(&env)
+}
+
+func (abaS *ABAService) HandleABAMessage(env *typedefs.ABAEnvelope) error {
+	switch m := env.Msg.(type) {
+	case *typedefs.ABAEnvelope_BvMsg:
+		return abaS.HandleBVMessage(m)
+	case *typedefs.ABAEnvelope_AuxMsg:
+		return abaS.HandleAuxMessage(m)
+	case *typedefs.ABAEnvelope_AuxSetMsg:
+		return abaS.HandleAuxSetMessage(m)
+	case *typedefs.ABAEnvelope_CoinMsg:
+		return abaS.HandleCoinMessage(m)
+	default:
+		return fmt.Errorf("unknown ABAEnvelope message type")
+	}
 }
 
 func DecodeMessagesByType(encodedMessages [][]byte) (

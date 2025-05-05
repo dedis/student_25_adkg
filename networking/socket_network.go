@@ -1,11 +1,11 @@
 package networking
 
-// ChatGPT was here 👀
 // Implementation of the network interface
 // adapted to work on top of dedis/cs438 transport layer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -22,7 +22,6 @@ type TransportNetwork struct {
 	peers     *PeerMap
 }
 
-// NewNetwork creates a new network instance using the given transport
 func NewTransportNetwork(t transport.Transport) *TransportNetwork {
 	return &TransportNetwork{
 		transport: t,
@@ -125,7 +124,6 @@ func NewSocketNetwork(socket transport.Socket, id int64, peers *PeerMap) *Socket
 }
 
 func (n *SocketNetwork) Send(msg []byte, to int64) error {
-	// addrMap := n.peers.GetPeers(n.id)
 	addrMap := n.peers.GetAllNodes()
 	addr, ok := addrMap[to]
 	if !ok {
@@ -152,12 +150,10 @@ func (n *SocketNetwork) Send(msg []byte, to int64) error {
 }
 
 func (n *SocketNetwork) Broadcast(msg []byte) error {
-	// addrMap := n.peers.GetPeers(n.id)
 	addrMap := n.peers.GetAllNodes()
 	timeout := time.Second
 	for _, addr := range addrMap {
 		// I AM sending to myself as well
-
 		header := transport.NewHeader(n.socket.GetAddress(), addr, addr)
 		packet := transport.Packet{
 			Header: &header,
@@ -218,7 +214,6 @@ func (n *SocketNetwork) Close() error {
 	return nil
 }
 
-// Internal goroutine to receive packets.
 func (n *SocketNetwork) receiver() {
 	defer n.recvWg.Done()
 	timeout := time.Second
@@ -230,7 +225,8 @@ func (n *SocketNetwork) receiver() {
 		default:
 			pkt, err := n.socket.Recv(timeout)
 			if err != nil {
-				if _, ok := err.(transport.TimeoutError); ok {
+				var timeoutErr transport.TimeoutError
+				if errors.As(err, &timeoutErr) {
 					continue
 				}
 				// Other errors: assume fatal

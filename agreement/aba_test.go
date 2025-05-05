@@ -2,7 +2,6 @@ package agreement
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"student_25_adkg/networking"
 	"student_25_adkg/transport/disrupted"
@@ -36,7 +35,7 @@ func ABADefaultSetup(network *networking.TransportNetwork) (
 	ctx, cancel = context.WithCancel(context.Background())
 
 	// localShare share.PriShare, pubCommitment *share.PubPoly for each coin
-	seedBytes := []byte(fmt.Sprintf("Hello Common Coin {}"))
+	seedBytes := []byte("Hello Common Coin {}")
 	stream := blake2xb.New(seedBytes)
 	suite := bn256.NewSuiteRand(stream)
 	scheme := tbls.NewThresholdSchemeOnG1(suite)
@@ -89,7 +88,7 @@ func ABAsMultipleSetup(agreementIDs []int) (
 	ctx, cancel = context.WithCancel(context.Background())
 
 	// localShare share.PriShare, pubCommitment *share.PubPoly for each coin
-	seedBytes := []byte(fmt.Sprintf("Hello Common Coin {}"))
+	seedBytes := []byte("Hello Common Coin {}")
 	stream := blake2xb.New(seedBytes)
 	suite := bn256.NewSuiteRand(stream)
 	scheme := tbls.NewThresholdSchemeOnG1(suite)

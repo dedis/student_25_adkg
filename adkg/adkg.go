@@ -1,6 +1,7 @@
 package adkg
 
 type Phase int8
+type SendMode int8
 
 const (
 	sharing Phase = iota
@@ -9,10 +10,23 @@ const (
 	keyDerivation
 )
 
-type ADKG struct {
-	Phase
+const (
+	BROADCAST SendMode = iota
+	UNICAST
+)
+
+type Message struct {
+	Phase   Phase
+	content []byte
 }
 
-func NewADKG() *ADKG {
-	return &ADKG{Phase: sharing}
+type Packet struct {
+	SendMode    SendMode
+	Destination int
+	Message     *Message
+}
+
+type ADKG interface {
+	RunADKG() error
+	HandleMessage(Message) ([]Packet, error)
 }

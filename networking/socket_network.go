@@ -55,6 +55,17 @@ func (pm *PeerMap) GetPeers(excludeID int64) map[int64]string {
 	return result
 }
 
+func (pm *PeerMap) GetAllNodes() map[int64]string {
+	pm.RLock()
+	defer pm.RUnlock()
+
+	result := make(map[int64]string)
+	for id, addr := range pm.peers {
+		result[id] = addr
+	}
+	return result
+}
+
 func (pm *PeerMap) Add(id int64, addr string) {
 	pm.Lock()
 	defer pm.Unlock()
@@ -82,9 +93,8 @@ func (n *TransportNetwork) JoinNetwork() (NetworkInterface[[]byte], error) {
 }
 
 type SocketNetwork struct {
-	socket transport.Socket
-	id     int64
-	// peers     map[int64]string // mapping from ID to address
+	socket    transport.Socket
+	id        int64
 	peers     *PeerMap
 	incoming  chan []byte
 	stop      chan struct{}
@@ -115,7 +125,8 @@ func NewSocketNetwork(socket transport.Socket, id int64, peers *PeerMap) *Socket
 }
 
 func (n *SocketNetwork) Send(msg []byte, to int64) error {
-	addrMap := n.peers.GetPeers(n.id)
+	// addrMap := n.peers.GetPeers(n.id)
+	addrMap := n.peers.GetAllNodes()
 	addr, ok := addrMap[to]
 	if !ok {
 		return fmt.Errorf("unknown peer ID: %d", to)
@@ -141,7 +152,8 @@ func (n *SocketNetwork) Send(msg []byte, to int64) error {
 }
 
 func (n *SocketNetwork) Broadcast(msg []byte) error {
-	addrMap := n.peers.GetPeers(n.id)
+	// addrMap := n.peers.GetPeers(n.id)
+	addrMap := n.peers.GetAllNodes()
 	timeout := time.Second
 	for _, addr := range addrMap {
 		// I AM sending to myself as well
@@ -172,9 +184,6 @@ func (n *SocketNetwork) Receive(ctx context.Context) ([]byte, error) {
 	case <-n.stop:
 		return nil, fmt.Errorf("network stopped")
 	case msg := <-n.incoming:
-		n.recvMutex.Lock()
-		n.received = append(n.received, msg)
-		n.recvMutex.Unlock()
 		return msg, nil
 	}
 }
@@ -186,13 +195,21 @@ func (n *SocketNetwork) GetID() int64 {
 func (n *SocketNetwork) GetSent() [][]byte {
 	n.recvMutex.Lock()
 	defer n.recvMutex.Unlock()
-	return append([][]byte(nil), n.sent...)
+	sent := [][]byte{}
+	for _, pkt := range n.socket.GetOuts() {
+		sent = append(sent, pkt.Msg.Payload)
+	}
+	return sent
 }
 
 func (n *SocketNetwork) GetReceived() [][]byte {
 	n.recvMutex.Lock()
 	defer n.recvMutex.Unlock()
-	return append([][]byte(nil), n.received...)
+	received := [][]byte{}
+	for _, pkt := range n.socket.GetIns() {
+		received = append(received, pkt.Msg.Payload)
+	}
+	return received
 }
 
 func (n *SocketNetwork) Close() error {

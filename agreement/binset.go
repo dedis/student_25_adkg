@@ -159,7 +159,9 @@ func ConvertFromView(view typedefs.View) ([3]bool, error) {
 		return [3]bool{false, true, false}, nil
 	case typedefs.View_UNDECIDED:
 		return [3]bool{false, false, true}, nil
-	default:
+	case typedefs.View_VIEW_UNSPECIFIED:
 		return [3]bool{}, fmt.Errorf("invalid view: View_VIEW_UNSPECIFIED")
+	default:
+		return [3]bool{}, fmt.Errorf("invalid view")
 	}
 }

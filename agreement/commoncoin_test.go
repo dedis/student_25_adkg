@@ -26,7 +26,7 @@ func TestABA_CommonCoin_MockCoin(t *testing.T) {
 	coinCombs := findCombinations(nParticipants, threshold)
 	coinSigs := [][]byte{}
 
-	COIN_MSG := "Common coin msg"
+	coinMsg := "Common coin msg"
 	seedBytes := []byte("Hello Common Coin")
 	stream := blake2xb.New(seedBytes)
 	suite := bn256.NewSuiteRand(stream)
@@ -52,9 +52,9 @@ func TestABA_CommonCoin_MockCoin(t *testing.T) {
 
 	sigShares := make([][]byte, nParticipants)
 	for i, coin := range coins {
-		sig, err := coin.Scheme.Sign(coin.LocalShare, []byte(COIN_MSG))
+		sig, err := coin.Scheme.Sign(coin.LocalShare, []byte(coinMsg))
 		require.Nil(t, err)
-		require.Nil(t, coin.Scheme.VerifyPartial(coin.PubCommitment, []byte(COIN_MSG), sig))
+		require.Nil(t, coin.Scheme.VerifyPartial(coin.PubCommitment, []byte(coinMsg), sig))
 		idx, err := coin.Scheme.IndexOf(sig)
 		require.NoError(t, err)
 		require.Equal(t, int(coin.LocalShare.I), idx)
@@ -67,9 +67,9 @@ func TestABA_CommonCoin_MockCoin(t *testing.T) {
 			combShares = append(combShares, sigShares[shareIdx])
 		}
 
-		sig, err := scheme.Recover(pubPoly, []byte(COIN_MSG), combShares, threshold, nParticipants)
+		sig, err := scheme.Recover(pubPoly, []byte(coinMsg), combShares, threshold, nParticipants)
 		require.Nil(t, err)
-		err = scheme.VerifyRecovered(pubPoly.Commit(), []byte(COIN_MSG), sig)
+		err = scheme.VerifyRecovered(pubPoly.Commit(), []byte(coinMsg), sig)
 		require.Nil(t, err)
 		coinSigs = append(coinSigs, sig)
 	}
@@ -106,7 +106,6 @@ func TestABA_CommonCoin_Simple(t *testing.T) {
 	for i := 0; i < nParticipants; i++ {
 		iface := network.JoinNetwork()
 		abaStream := NewABAStream(iface)
-		// TODO add crypto stuffs
 		nodeConf := &ABACommonConfig{
 			NParticipants: nParticipants,
 			Threshold:     threshold,

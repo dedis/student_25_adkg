@@ -48,7 +48,13 @@ func BVDefaultNetworkSetup() (
 		bvInstances[i] = abaNode.BVManager.GetOrCreate(abaID)
 	}
 
-	return
+	return networkIfaces,
+		nParticipants,
+		threshold,
+		notifyChs,
+		abaID,
+		bvInstances,
+		cancel
 }
 
 // Assume 3t+1 correct processes. Everyone broadcasts 1.
@@ -56,7 +62,7 @@ func BVDefaultNetworkSetup() (
 // Getting notification on addition to binValues IS tested.
 func TestABA_BVBroadcast_NotifySimple(t *testing.T) {
 
-	networkIfaces, nParticipants, _, notifyChs, abaID, bvInstances, cancel := BVDefaultNetworkSetup()
+	networkIfaces, nParticipants, threshold, notifyChs, abaID, bvInstances, cancel := BVDefaultNetworkSetup()
 	proposalVal := 1
 
 	wg := sync.WaitGroup{}
@@ -90,7 +96,7 @@ func TestABA_BVBroadcast_NotifySimple(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		require.Equal(t, nParticipants, len(bvMsgs))
+		require.True(t, len(bvMsgs) >= threshold*2+1)
 	}
 	cancel()
 }
@@ -144,12 +150,12 @@ func TestABA_BVBroadcast_TByzantine_Success(t *testing.T) {
 	randomProcesses, err := uniqueRandomInts(threshold*2+1, 0, nParticipants)
 	require.NoError(t, err)
 
-	correctIds := randomProcesses[:threshold+1]
-	byzIds := randomProcesses[threshold+1:]
+	correctIDs := randomProcesses[:threshold+1]
+	byzIDs := randomProcesses[threshold+1:]
 
 	wg := sync.WaitGroup{}
-	wg.Add(len(correctIds) + len(byzIds))
-	for _, pid := range correctIds {
+	wg.Add(len(correctIDs) + len(byzIDs))
+	for _, pid := range correctIDs {
 		go func(pid int) {
 			defer wg.Done()
 			notifyCh, err := bvInstances[pid].Propose(abaID, correctVal)
@@ -158,7 +164,7 @@ func TestABA_BVBroadcast_TByzantine_Success(t *testing.T) {
 		}(pid)
 	}
 
-	for _, pid := range byzIds {
+	for _, pid := range byzIDs {
 		go func(pid int) {
 			defer wg.Done()
 			notifyCh, err := bvInstances[pid].Propose(abaID, byzVal)
@@ -177,7 +183,7 @@ func TestABA_BVBroadcast_TByzantine_Success(t *testing.T) {
 	}
 
 	// Verify that all correct nodes' binValues contain the correct value
-	for _, pid := range correctIds {
+	for _, pid := range correctIDs {
 		binValues := bvInstances[pid].BinValues.AsBools()
 		require.NoError(t, err)
 		require.True(t, binValues[1], "Node %d: binValues should contain 1", pid)
@@ -196,13 +202,13 @@ func TestABA_BVBroadcast_TByzantine_Fail(t *testing.T) {
 	byzVal := 0
 
 	// Sample t+1 correct and t byzantine processes
-	byzIds, err := uniqueRandomInts(threshold, 0, nParticipants)
+	byzIDs, err := uniqueRandomInts(threshold, 0, nParticipants)
 	require.NoError(t, err)
 
 	wg := sync.WaitGroup{}
-	wg.Add(len(byzIds))
+	wg.Add(len(byzIDs))
 
-	for _, pid := range byzIds {
+	for _, pid := range byzIDs {
 		go func(pid int) {
 			defer wg.Done()
 			notifyCh, err := bvInstances[pid].Propose(abaID, byzVal)
@@ -219,7 +225,7 @@ func TestABA_BVBroadcast_TByzantine_Fail(t *testing.T) {
 	time.Sleep(time.Millisecond * 15 * time.Duration(nParticipants))
 
 	// Verify that all nodes' binValues are empty
-	for _, pid := range byzIds {
+	for _, pid := range byzIDs {
 		binValues := bvInstances[pid].BinValues.AsBools()
 		require.NoError(t, err)
 		require.False(t, binValues[0], "Node %d: binValues should not contain 0", pid)

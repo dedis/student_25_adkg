@@ -131,54 +131,22 @@ func (a *ABARound) pidsByBinVals() map[int][]int {
 
 // return est, if decided, if used the coin, err
 func (a *ABARound) Start(est int) (int, bool, bool, error) {
-	a.mu.Lock()
-	a.isActive = true
-	a.mu.Unlock()
+	a.markActive(true)
+	defer a.markActive(false)
 
 	a.processQueued()
-
-	hasDecided := false
-	withCoin := false
-
 	a.est = est
-	// SBV_Broadcast(est) SBV_Broadcast Stage[ri, 0](est)
-	curStageRoundID := ABARoundUID{AgreementID: a.agreementID, Round: a.round, Stage: 0}
-	sbvInst := a.sbvManager.GetOrCreate(curStageRoundID.String())
-	view0, binValues, err := sbvInst.Propose(curStageRoundID.String(), a.est)
-	if err != nil {
-		return a.est, false, false, fmt.Errorf("sbv broadcast failed %w", err)
+
+	if err := a.initialSBVBroadcast(); err != nil {
+		return a.est, false, false, err
 	}
 
-	a.views[0], err = NewBinSet().FromBools(view0)
-	if err != nil {
-		return a.est, false, false, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
-	}
-	a.binValues, err = NewBinSet().FromBools(binValues)
-	if err != nil {
-		return a.est, false, false, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+	if err := a.broadcastAuxSet(); err != nil {
+		return a.est, false, false, err
 	}
 
-	// broadcast auxset
-	msg := typedefs.AuxSetMessage{
-		RoundId:    curStageRoundID.String(),
-		SourceNode: int32(a.nodeID),
-		View:       ConvertToView(a.views[0].AsBools()),
-	}
-	err = a.broadcast(&msg)
-	if err != nil {
-		return a.est, false, false, fmt.Errorf("auxset broadcast failed %w", err)
-	}
-
-	for {
-		<-a.auxSetCh
-		complete, view := AuxSetViewPredicate(a.pidsByBinVals(), a.nParticipants, a.threshold, a.binValues)
-		if complete {
-			a.views[1], err = NewBinSet().FromBools(view)
-			if err != nil {
-				return a.est, false, false, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
-			}
-			break
-		}
+	if err := a.collectAuxSet(); err != nil {
+		return a.est, false, false, err
 	}
 
 	if a.views[1].Length() == 1 {
@@ -187,50 +155,113 @@ func (a *ABARound) Start(est int) (int, bool, bool, error) {
 		a.est = UndecidedBinVal
 	}
 
-	// second SBV broadcast
-	curStageRoundID = ABARoundUID{AgreementID: a.agreementID, Round: a.round, Stage: 2}
-	sbvInst = a.sbvManager.GetOrCreate(curStageRoundID.String())
-	view2, _, err := sbvInst.Propose(curStageRoundID.String(), a.est)
+	if err := a.secondSBVBroadcast(); err != nil {
+		return a.est, false, false, err
+	}
 
+	hasDecided, withCoin, err := a.tryDecide()
 	if err != nil {
-		return a.est, false, false, fmt.Errorf("sbv broadcast failed %w", err)
+		return a.est, false, false, err
+	}
+
+	return a.est, hasDecided, withCoin, nil
+}
+
+func (a *ABARound) markActive(active bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.isActive = active
+}
+
+func (a *ABARound) initialSBVBroadcast() error {
+	uid := ABARoundUID{AgreementID: a.agreementID, Round: a.round, Stage: 0}
+	inst := a.sbvManager.GetOrCreate(uid.String())
+
+	view0, binValues, err := inst.Propose(uid.String(), a.est)
+	if err != nil {
+		return fmt.Errorf("sbv broadcast failed %w", err)
+	}
+
+	a.views[0], err = NewBinSet().FromBools(view0)
+	if err != nil {
+		return fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+	}
+	a.binValues, err = NewBinSet().FromBools(binValues)
+	if err != nil {
+		return fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+	}
+	return nil
+}
+
+func (a *ABARound) broadcastAuxSet() error {
+	msg := typedefs.AuxSetMessage{
+		RoundId:    ABARoundUID{AgreementID: a.agreementID, Round: a.round, Stage: 0}.String(),
+		SourceNode: int32(a.nodeID),
+		View:       ConvertToView(a.views[0].AsBools()),
+	}
+	return a.broadcast(&msg)
+}
+
+func (a *ABARound) collectAuxSet() error {
+	for {
+		<-a.auxSetCh
+		complete, view := AuxSetViewPredicate(a.pidsByBinVals(), a.nParticipants, a.threshold, a.binValues)
+		if complete {
+			var err error
+			a.views[1], err = NewBinSet().FromBools(view)
+			if err != nil {
+				return fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+			}
+			break
+		}
+	}
+	return nil
+}
+
+func (a *ABARound) secondSBVBroadcast() error {
+	uid := ABARoundUID{AgreementID: a.agreementID, Round: a.round, Stage: 2}
+	inst := a.sbvManager.GetOrCreate(uid.String())
+
+	view2, _, err := inst.Propose(uid.String(), a.est)
+	if err != nil {
+		return fmt.Errorf("sbv broadcast failed %w", err)
 	}
 
 	a.views[2], err = NewBinSet().FromBools(view2)
 	if err != nil {
-		return a.est, false, false, fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+		return fmt.Errorf("error during aba round %d, err: %s", a.round, err.Error())
+	}
+	return nil
+}
+
+func (a *ABARound) tryDecide() (bool, bool, error) {
+	v2 := a.views[2]
+	if v2.Length() == 1 && !v2.ContainsUndecided() {
+		a.est = v2.AsInts()[0]
+		logger.Debug().Msgf("DECIDED %d at round %d node %d", a.est, a.round, a.nodeID)
+		return true, false, nil
 	}
 
-	var coinVal int
-	if a.views[2].Length() == 1 &&
-		!a.views[2].ContainsUndecided() {
-		a.est = a.views[2].AsInts()[0]
-		hasDecided = true
-		logger.Debug().Msgf("DECIDED %d at round %d node %d", a.est, a.round, a.nodeID)
-	} else {
-		coinVal, err = a.CCoinManageer.GetOrCreate(curStageRoundID.String()).Flip()
-		if err != nil {
-			return a.est, false, false, fmt.Errorf("failed to flip a coin during aba round %d at node %d, err: %s", a.round, a.nodeID, err.Error())
-		}
+	uid := ABARoundUID{AgreementID: a.agreementID, Round: a.round, Stage: 2}
+	coinVal, err := a.CCoinManageer.GetOrCreate(uid.String()).Flip()
+	if err != nil {
+		return false, false,
+			fmt.Errorf("failed to flip a coin during aba round %d at node %d, err: %s", a.round, a.nodeID, err.Error())
 	}
-	if a.views[2].Length() == 2 &&
-		a.views[2].ContainsUndecided() {
-		if a.views[2].ContainsZero() {
+
+	if v2.Length() == 2 && v2.ContainsUndecided() {
+		if v2.ContainsZero() {
 			a.est = Zero
-		} else if a.views[2].ContainsOne() {
+		} else if v2.ContainsOne() {
 			a.est = One
 		}
-	} else if a.views[2].ContainsUndecided() {
+	} else if v2.ContainsUndecided() {
 		logger.Debug().Msgf("DECIDED WITH COIN: Est %d, coinval %d at round %d node %d", a.est, coinVal, a.round, a.nodeID)
-		hasDecided = true
-		withCoin = true
 		a.est = coinVal
+		return true, true, nil
 	}
 
-	a.mu.Lock()
-	a.isActive = false
-	a.mu.Unlock()
-	return a.est, hasDecided, withCoin, nil
+	return false, false, nil
 }
 
 func (a *ABARound) HandleMessage(msg *typedefs.AuxSetMessage) error {
@@ -243,14 +274,13 @@ func (a *ABARound) HandleMessage(msg *typedefs.AuxSetMessage) error {
 
 	if _, ok := a.received[int(msg.SourceNode)]; ok {
 		return fmt.Errorf("redundant AUX from node %d", msg.SourceNode)
-	} else {
-		var err error
-		viewBinSet, err := ConvertFromView(msg.View)
-		if err != nil {
-			return err
-		}
-		a.received[int(msg.SourceNode)], _ = NewBinSet().FromBools(viewBinSet)
 	}
+
+	viewBinSet, err := ConvertFromView(msg.View)
+	if err != nil {
+		return err
+	}
+	a.received[int(msg.SourceNode)], _ = NewBinSet().FromBools(viewBinSet)
 
 	a.auxSetCh <- struct{}{}
 	return nil

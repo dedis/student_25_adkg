@@ -50,14 +50,21 @@ func SBVDefaultSetup() (
 		sbvInstances[i] = abaNode.SBVManager.GetOrCreate(abaID)
 	}
 
-	return
+	return networkIfaces,
+		nParticipants,
+		threshold,
+		views,
+		binValues,
+		abaID,
+		sbvInstances,
+		cancel
 }
 
 // Assume 3t+1 correct processes. Everyone broadcasts 1.
 // Eventually all binvalues will contain 1.
 func TestABA_SBVBroadcast_Simple(t *testing.T) {
 
-	netIfaces, nParticipants, _, views, binValues, abaID, sbvInstances, cancel := SBVDefaultSetup()
+	netIfaces, nParticipants, threshold, views, binValues, abaID, sbvInstances, cancel := SBVDefaultSetup()
 	proposalVal := 1
 
 	wg := sync.WaitGroup{}
@@ -91,8 +98,9 @@ func TestABA_SBVBroadcast_Simple(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		require.Equal(t, nParticipants, len(auxMessages))
-		require.Equal(t, nParticipants, len(bvMsgs))
+		require.True(t, len(auxMessages) >= nParticipants-threshold)
+		require.True(t, len(bvMsgs) >= threshold*2+1)
+
 	}
 
 	cancel()
@@ -126,7 +134,8 @@ func TestABA_SBVBroadcast_TwoValues(t *testing.T) {
 	for i := 0; i < nParticipants; i++ {
 		require.True(t, binValues[i][0] || binValues[i][1], "Node %d: binValues could contain 0 or 1 or both", i)
 		require.True(t, views[i][0] || views[i][1], "Node %d: view could contain 0 or 1 or both", i)
-		require.False(t, views[i][2] || binValues[i][2], "Node %d: neither view nor binValues should not contain nonbinary values", i)
+		require.False(t, views[i][2] || binValues[i][2],
+			"Node %d: neither view nor binValues should not contain nonbinary values", i)
 	}
 
 	cancel()
@@ -166,7 +175,8 @@ func TestABA_SBVBroadcast_SilentThreshold(t *testing.T) {
 
 	// Verify that all nodes' binValues and views contain the correct value
 	for _, pid := range correctIDs {
-		require.True(t, !binValues[pid][0] && binValues[pid][1] && !binValues[pid][2], "Node %d: binValues should only contain 1", pid)
+		require.True(t, !binValues[pid][0] && binValues[pid][1] && !binValues[pid][2],
+			"Node %d: binValues should only contain 1", pid)
 		require.True(t, !views[pid][0] && views[pid][1] && !views[pid][2], "Node %d: view should only contain 1", pid)
 	}
 

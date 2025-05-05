@@ -65,14 +65,20 @@ func ABADefaultSetup(network *networking.TransportNetwork) (
 		abaStream.Listen(ctx, abaNode)
 		abaInstances[i] = abaNode.ABAManager.GetOrCreate(strconv.Itoa(agreementID))
 	}
-	return
+	return nParticipants,
+		threshold,
+		abaInstances,
+		decidedVals,
+		ctx,
+		cancel,
+		agreementID
 }
 
 func ABAsMultipleSetup(agreementIDs []int) (
 	nParticipants int,
 	threshold int,
 	abaInstances []map[int]*ABA, // pid -> agreementID -> ABA
-	decidedVals []int,
+	decidedVals []map[int]int,
 	ctx context.Context,
 	cancel context.CancelFunc,
 ) {
@@ -82,7 +88,12 @@ func ABAsMultipleSetup(agreementIDs []int) (
 	for pid := range abaInstances {
 		abaInstances[pid] = make(map[int]*ABA)
 	}
-	decidedVals = make([]int, nParticipants)
+	// decidedVals = make([]int, nParticipants)
+	decidedVals = make([]map[int]int, nParticipants)
+	for pid := range decidedVals {
+		decidedVals[pid] = make(map[int]int)
+	}
+
 	network := networking.NewTransportNetwork(udp.NewUDP())
 
 	ctx, cancel = context.WithCancel(context.Background())
@@ -120,7 +131,12 @@ func ABAsMultipleSetup(agreementIDs []int) (
 			abaInstances[i][agrID] = abaNode.ABAManager.GetOrCreate(strconv.Itoa(agrID))
 		}
 	}
-	return
+	return nParticipants,
+		threshold,
+		abaInstances,
+		decidedVals,
+		ctx,
+		cancel
 }
 
 // Assume 3t+1 correct processes. Everyone broadcasts 1.
@@ -194,6 +210,7 @@ func TestABA_WithCoin(t *testing.T) {
 func TestABA_Multiple_Simple(t *testing.T) {
 	agreementIDs := []int{1, 2, 3}
 	nParticipants, _, abaInstances, decidedVals, _, cancel := ABAsMultipleSetup(agreementIDs)
+	var decideMu sync.Mutex
 
 	proposalVal := 1
 	wg := sync.WaitGroup{}
@@ -202,8 +219,10 @@ func TestABA_Multiple_Simple(t *testing.T) {
 		for _, agrID := range agreementIDs {
 			go func(pid int) {
 				defer wg.Done()
-				var err error
-				decidedVals[i], err = abaInstances[pid][agrID].Propose(proposalVal)
+				decision, err := abaInstances[pid][agrID].Propose(proposalVal)
+				decideMu.Lock()
+				decidedVals[i][agrID] = decision
+				decideMu.Unlock()
 				require.NoError(t, err)
 			}(i)
 		}
@@ -213,8 +232,10 @@ func TestABA_Multiple_Simple(t *testing.T) {
 	wg.Wait()
 
 	// Verify that all nodes' decided the correct value for each aba
-	for i := 0; i < nParticipants; i++ {
-		require.Equal(t, proposalVal, decidedVals[i], "Node %d should have decided %a", i, proposalVal)
+	for _, agrID := range agreementIDs {
+		for i := 0; i < nParticipants; i++ {
+			require.Equal(t, proposalVal, decidedVals[i][agrID], "Node %d should have decided %a", i, proposalVal)
+		}
 	}
 
 	cancel()

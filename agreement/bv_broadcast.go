@@ -72,18 +72,18 @@ func (b *BVBroadcast) HandleMessage(msg *typedefs.BVMessage) error {
 	if msg.BinValue != Zero && msg.BinValue != One && msg.BinValue != UndecidedBinVal {
 		return fmt.Errorf("invalid binary value %d from node %d", msg.BinValue, msg.SourceNode)
 	}
-	msg_binval := int(msg.BinValue)
-	msg_source := int(msg.SourceNode)
+	msgBinval := int(msg.BinValue)
+	msgSource := int(msg.SourceNode)
 
 	b.mu.Lock()
-	if _, ok := b.received[msg_binval][msg_source]; ok {
+	if _, ok := b.received[msgBinval][msgSource]; ok {
 		b.mu.Unlock()
 		return fmt.Errorf("redundant bv_broadcast from node %d", msg.SourceNode)
 	}
-	b.received[msg_binval][msg_source] = struct{}{}
+	b.received[msgBinval][msgSource] = struct{}{}
 
 	shouldBroadcast := false
-	if len(b.received[msg_binval]) >= b.threshold+1 && !b.broadcasted[msg.BinValue] {
+	if len(b.received[msgBinval]) >= b.threshold+1 && !b.broadcasted[msg.BinValue] {
 		b.broadcasted[msg.BinValue] = true
 		shouldBroadcast = true
 	}
@@ -99,8 +99,8 @@ func (b *BVBroadcast) HandleMessage(msg *typedefs.BVMessage) error {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if len(b.received[msg_binval]) >= 2*b.threshold+1 && !b.BinValues.AsBools()[msg.BinValue] {
-		b.BinValues.AddValue(msg_binval)
+	if len(b.received[msgBinval]) >= 2*b.threshold+1 && !b.BinValues.AsBools()[msg.BinValue] {
+		b.BinValues.AddValue(msgBinval)
 		b.notifyCh <- struct{}{}
 	}
 	return nil

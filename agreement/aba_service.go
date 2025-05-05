@@ -15,28 +15,28 @@ type ABAService struct {
 	CCoinManageer *InstanceManager[CommonCoin, CommonCoinConfig]
 }
 
-func (b *ABAService) HandleBVMessage(msg *typedefs.ABAEnvelope_BvMsg) error {
-	return b.BVManager.GetOrCreate(msg.BvMsg.GetRoundId()).HandleMessage(msg.BvMsg)
+func (abaS *ABAService) HandleBVMessage(msg *typedefs.ABAEnvelope_BvMsg) error {
+	return abaS.BVManager.GetOrCreate(msg.BvMsg.GetRoundId()).HandleMessage(msg.BvMsg)
 }
 
-func (b *ABAService) HandleAuxMessage(msg *typedefs.ABAEnvelope_AuxMsg) error {
-	return b.SBVManager.GetOrCreate(msg.AuxMsg.GetRoundId()).HandleMessage(msg.AuxMsg)
+func (abaS *ABAService) HandleAuxMessage(msg *typedefs.ABAEnvelope_AuxMsg) error {
+	return abaS.SBVManager.GetOrCreate(msg.AuxMsg.GetRoundId()).HandleMessage(msg.AuxMsg)
 }
 
-func (b *ABAService) HandleAuxSetMessage(msg *typedefs.ABAEnvelope_AuxSetMsg) error {
-	abaRoundId, err := ABARoundUIDFromString(msg.AuxSetMsg.GetRoundId())
+func (abaS *ABAService) HandleAuxSetMessage(msg *typedefs.ABAEnvelope_AuxSetMsg) error {
+	abaRoundID, err := ABARoundUIDFromString(msg.AuxSetMsg.GetRoundId())
 	if err != nil {
 		logger.Error().Msgf("failed to convert %s to ABARoundUID, %v", msg.AuxSetMsg.GetRoundId(), err)
 	}
-	return b.ABAManager.GetOrCreate(strconv.Itoa(abaRoundId.AgreementID)).HandleMessage(msg.AuxSetMsg)
+	return abaS.ABAManager.GetOrCreate(strconv.Itoa(abaRoundID.AgreementID)).HandleMessage(msg.AuxSetMsg)
 }
 
-func (b *ABAService) HandleCoinMessage(msg *typedefs.ABAEnvelope_CoinMsg) error {
-	return b.CCoinManageer.GetOrCreate(msg.CoinMsg.BroadcastId).HandleMessage(msg.CoinMsg)
+func (abaS *ABAService) HandleCoinMessage(msg *typedefs.ABAEnvelope_CoinMsg) error {
+	return abaS.CCoinManageer.GetOrCreate(msg.CoinMsg.BroadcastId).HandleMessage(msg.CoinMsg)
 }
 
-func (b *ABAService) GetBV(id string) *BVBroadcast {
-	return b.BVManager.GetOrCreate(id)
+func (abaS *ABAService) GetBV(id string) *BVBroadcast {
+	return abaS.BVManager.GetOrCreate(id)
 }
 
 func NewABAService(conf ABACommonConfig) *ABAService {

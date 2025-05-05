@@ -142,7 +142,12 @@ func (coin *CommonCoin) HandleMessage(msg *typedefs.CoinMessage) error {
 	coin.received[msg.SourceNode] = msg.SigShare
 
 	if len(coin.received) == int(coin.threshold) {
-		thresholdSig, err := coin.scheme.Recover(coin.pubCommitments, coinRoundMsg, coin.collectSigs(), int(coin.threshold), int(coin.nParticipants))
+		thresholdSig, err := coin.scheme.Recover(
+			coin.pubCommitments,
+			coinRoundMsg,
+			coin.collectSigs(),
+			int(coin.threshold),
+			int(coin.nParticipants))
 
 		if err != nil {
 			logger.Error().Msgf("failed to recover threshold sig for coin id %s", msg.BroadcastId)
@@ -197,20 +202,20 @@ func (coin *CommonCoin) Flip() (int, error) {
 	return coin.result, nil
 }
 
-func (s *CommonCoin) processQueued() {
-	for msg := range s.queuedMsgs {
+func (coin *CommonCoin) processQueued() {
+	for msg := range coin.queuedMsgs {
 		go func() {
-			err := s.HandleMessage(msg)
+			err := coin.HandleMessage(msg)
 			if err != nil {
 				logger.Info().Msgf("failed handling CoinMessage: %s from node %d at node %d", msg.String(),
-					s.nodeID, msg.SourceNode)
+					coin.nodeID, msg.SourceNode)
 			}
 		}()
 	}
 
 	// queue will not grow further since the coin instance is active
 	// by the time this function is called
-	for msg := range s.queuedMsgs {
-		delete(s.queuedMsgs, msg)
+	for msg := range coin.queuedMsgs {
+		delete(coin.queuedMsgs, msg)
 	}
 }

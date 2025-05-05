@@ -54,6 +54,17 @@ func (pm *PeerMap) GetPeers(excludeID int64) map[int64]string {
 	return result
 }
 
+func (pm *PeerMap) GetAllNodes() map[int64]string {
+	pm.RLock()
+	defer pm.RUnlock()
+
+	result := make(map[int64]string)
+	for id, addr := range pm.peers {
+		result[id] = addr
+	}
+	return result
+}
+
 func (pm *PeerMap) Add(id int64, addr string) {
 	pm.Lock()
 	defer pm.Unlock()
@@ -81,9 +92,8 @@ func (n *TransportNetwork) JoinNetwork() (NetworkInterface, error) {
 }
 
 type SocketNetwork struct {
-	socket transport.Socket
-	id     int64
-	// peers     map[int64]string // mapping from ID to address
+	socket    transport.Socket
+	id        int64
 	peers     *PeerMap
 	incoming  chan []byte
 	stop      chan struct{}

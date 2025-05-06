@@ -1,14 +1,15 @@
 package reedsolomon
 
 import (
+	"testing"
+
 	"github.com/HACKERALERT/infectious"
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/group/edwards25519"
-	"testing"
 )
 
-func checkEncoding(t *testing.T, encoded []Encoding, expected []byte, decoder RSDecoder) {
+func checkEncoding(t *testing.T, expected []byte, encoded []Encoding, decoder RSDecoder) {
 	// Decode the message
 	decoded, err := decoder.Decode(encoded)
 	require.NoError(t, err)
@@ -38,7 +39,7 @@ func TestBWCodes_Simple(t *testing.T) {
 	encoded, err := rsCodes.Encode(message)
 	require.NoError(t, err)
 
-	checkEncoding(t, encoded, message, rsCodes)
+	checkEncoding(t, message, encoded, rsCodes)
 }
 
 // TestBWCodes_Corrupted tests that encoding and decoding a message where some
@@ -47,7 +48,6 @@ func TestBWCodes_Corrupted(t *testing.T) {
 	k := 3
 	n := 7
 	rsCodes := NewBWCodes(k, n)
-	// Max error is lower bound of (n-k)/2
 
 	// Create a message with values  from 0 to k-1
 	message := make([]byte, 2*k)
@@ -60,13 +60,15 @@ func TestBWCodes_Corrupted(t *testing.T) {
 	require.NoError(t, err)
 
 	// Alter some data
+	// Max error is lower bound of (n-k)/2=2 thus altering
+	// 2 encodings should still work
 	encoded[1].Val[0] = byte('s')
 	encoded[1].Val[1] = byte('e')
 	encoded[0].Val[0] = byte('x')
 	encoded[0].Val[1] = byte('y')
 
 	// Check the encoding
-	checkEncoding(t, encoded, message, rsCodes)
+	checkEncoding(t, message, encoded, rsCodes)
 
 	// Add additional corruption and check that it fails (the call to decode fixed the "encoded" array)
 	encoded[1].Val[0] = byte('s')
@@ -86,7 +88,6 @@ func TestBWCodes_Erasure(t *testing.T) {
 	k := 3
 	n := 7
 	rsCodes := NewBWCodes(k, n)
-	// Max error is lower bound of (n-k)/2
 
 	// Create a message with values  from 0 to k-1
 	message := make([]byte, 2*k)
@@ -99,16 +100,17 @@ func TestBWCodes_Erasure(t *testing.T) {
 	require.NoError(t, err)
 
 	// Drop some data
+	// Max error is lower bound of (n-k)/2=2
 	encoded = encoded[2:]
 
 	// Check the encoding
-	checkEncoding(t, encoded, message, rsCodes)
+	checkEncoding(t, message, encoded, rsCodes)
 
 	// Drop 2 more packets
 
 	encoded = encoded[2:]
 
-	checkEncoding(t, encoded, message, rsCodes)
+	checkEncoding(t, message, encoded, rsCodes)
 
 	// Drop one more packet and expect it to fail
 	encoded = encoded[1:]
@@ -141,7 +143,7 @@ func TestBWCodes_EncodeScalars(t *testing.T) {
 	encoded, err := rsCodes.Encode(msg)
 	require.NoError(t, err)
 
-	checkEncoding(t, encoded, msg, rsCodes)
+	checkEncoding(t, msg, encoded, rsCodes)
 
 	decoded, err := rsCodes.Decode(encoded)
 	require.NoError(t, err)

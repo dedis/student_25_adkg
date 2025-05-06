@@ -46,14 +46,30 @@ func (n *FakeNetwork) JoinNetwork() (NetworkInterface, error) {
 	return n.JoinWithBuffer(10000)
 }
 
+func (n *FakeNetwork) computeDelayFromTo(from, to int64) (time.Duration, bool) {
+	delayOut, okOut := n.delayMap[from]
+	delayIn, okIn := n.delayMap[to]
+	if !okOut && !okIn {
+		return 0, false
+	}
+	if !okOut {
+		delayOut = time.Duration(0)
+	}
+	if !okIn {
+		delayIn = time.Duration(0)
+	}
+	delay := delayIn + delayOut
+	return delay, true
+}
+
 func (n *FakeNetwork) Send(msg []byte, from, to int64) error {
 	rcv, ok := n.nodes[to]
 	if !ok {
 		return fmt.Errorf("destination node %d not found", to)
 	}
 	// Put the message in the recipient's receive channel
-	delay, ok := n.delayMap[from]
-	if ok {
+	delay, delayed := n.computeDelayFromTo(from, to)
+	if delayed {
 		go func() {
 			time.Sleep(delay)
 			rcv <- msg
@@ -118,6 +134,7 @@ func (f *FakeInterface) Broadcast(msg []byte) error {
 	return nil
 }
 
+// Receive blocks until something is received or the context passed stops
 func (f *FakeInterface) Receive(ctx context.Context) ([]byte, error) {
 	select {
 	case msg := <-f.rcvQueue:

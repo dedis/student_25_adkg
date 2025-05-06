@@ -4,41 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"hash"
-	"os"
-	"strconv"
+	"student_25_adkg/logging"
 	"student_25_adkg/rbc"
 	"student_25_adkg/rbc/fourrounds/typedefs"
 	"student_25_adkg/reedsolomon"
 	"sync"
-	"time"
 
 	"github.com/rs/zerolog"
 	"golang.org/x/xerrors"
 	"google.golang.org/protobuf/proto"
-)
-
-// Define the logger
-var (
-	logout = zerolog.ConsoleWriter{
-		Out:        os.Stdout,
-		TimeFormat: time.RFC3339,
-		// Format the node ID
-		FormatPrepare: func(e map[string]interface{}) error {
-			e["nodeID"] = fmt.Sprintf("[%s]", e["nodeID"])
-			return nil
-		},
-		// Change the order in which things appear
-		PartsOrder: []string{
-			zerolog.TimestampFieldName,
-			zerolog.LevelFieldName,
-			"nodeID",
-			zerolog.MessageFieldName,
-		},
-		// Prevent the nodeID from being printed again
-		FieldsExclude: []string{"nodeID"},
-	}
 )
 
 type FourRoundRBC struct {
@@ -64,21 +39,6 @@ func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 	iface rbc.AuthenticatedMessageStream,
 	rs reedsolomon.RSCodes, r int, nodeID int64) *FourRoundRBC {
 
-	// Disable logging based on the GLOG environment variable
-	var logLevel zerolog.Level
-	if os.Getenv("GLOG") == "no" {
-		logLevel = zerolog.Disabled
-	} else {
-		logLevel = zerolog.InfoLevel
-	}
-
-	logger := zerolog.New(logout).
-		Level(logLevel).
-		With().
-		Timestamp().
-		Str("nodeID", strconv.Itoa(int(nodeID))).
-		Logger()
-
 	return &FourRoundRBC{
 		iface:               iface,
 		predicate:           predicate,
@@ -94,7 +54,7 @@ func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 		r:                   r,
 		finalValue:          nil,
 		finished:            false,
-		log:                 logger,
+		log:                 logging.GetLogger(nodeID),
 		nodeID:              nodeID,
 	}
 }

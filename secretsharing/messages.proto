@@ -1,0 +1,22 @@
+syntax='proto3';
+package typedefs;
+option go_package ='./typedefs';
+message Message{
+  message Share{
+    bytes si=1;
+    bytes ri=2;
+    int64 idx=3;
+  }
+
+  message Reconstruct{
+    bytes si=1;
+    bytes ri=2;
+    int64 idx=3;
+  }
+}
+message Instruction {
+  oneof op{
+    Message.Share share_inst=3;
+    Message.Reconstruct reconstruct_inst=4;
+  }
+}

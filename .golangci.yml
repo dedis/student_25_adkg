@@ -211,17 +211,6 @@ issues:
   max-same-issues: 50
 
   exclude-rules:
-    - path: "_test\\.go|^gui|^internal|^peer/tests"
+    - path: "_test\\.go"
       linters:
-        - bodyclose
-        - dupl
-        - errcheck
         - funlen
-        - gochecknoglobals
-        - gocognit
-        - goconst
-        - gosec
-        - lll
-        - noctx
-        - unparam
-        - wrapcheck

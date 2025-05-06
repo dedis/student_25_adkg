@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 	"math/rand"
 	"student_25_adkg/networking"
 	"student_25_adkg/rbc/fourrounds/typedefs"
@@ -13,64 +11,27 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 type TestNode struct {
-	iface *MockAuthStream
-	rbc   *FourRoundRBC
-	networking.NetworkInterface[[]byte]
+	rbc *FourRoundRBC
+	networking.NetworkInterface
 }
 
-// MockAuthStream mocks an authenticated message stream. Nothing is actually authenticated.
-type MockAuthStream struct {
-	Network    networking.NetworkInterface[[]byte]
-	rcvChan    <-chan []byte
-	readDelay  time.Duration
-	writeDelay time.Duration
-}
-
-func NewMockAuthStream(iface networking.NetworkInterface[[]byte], readDelay, writeDelay time.Duration) *MockAuthStream {
-	return &MockAuthStream{
-		Network:    iface,
-		rcvChan:    make(chan []byte),
-		readDelay:  readDelay,
-		writeDelay: writeDelay,
-	}
-}
-
-func NoDelayMockAuthStream(iface networking.NetworkInterface[[]byte]) *MockAuthStream {
-	return &MockAuthStream{
-		Network:    iface,
-		rcvChan:    make(chan []byte),
-		readDelay:  0,
-		writeDelay: 0,
-	}
-}
-
-func (iface *MockAuthStream) Broadcast(bytes []byte) error {
-	// Artificially delay the broadcast
-	time.Sleep(iface.writeDelay)
-	return iface.Network.Broadcast(bytes)
-}
-
-func (iface *MockAuthStream) Receive(stop context.Context) ([]byte, error) {
-	msg, err := iface.Network.Receive(stop)
-	time.Sleep(iface.readDelay) // Artificially delay receiving
-	return msg, err
-}
-
-func NewTestNode(iface *MockAuthStream, rbc *FourRoundRBC) *TestNode {
+func NewTestNode(iface networking.NetworkInterface, rbc *FourRoundRBC) *TestNode {
 	return &TestNode{
-		iface:            iface,
 		rbc:              rbc,
-		NetworkInterface: iface.Network,
+		NetworkInterface: iface,
 	}
 }
 
-func startDummyNode(ctx context.Context, stream *MockAuthStream) {
+func startDummyNode(ctx context.Context, iface networking.NetworkInterface) {
 	go func() {
 		for {
-			_, _ = stream.Receive(ctx)
+			_, _ = iface.Receive(ctx)
 			if ctx.Err() != nil {
 				return
 			}
@@ -78,25 +39,31 @@ func startDummyNode(ctx context.Context, stream *MockAuthStream) {
 	}()
 }
 
-func pred([]byte) bool {
+// defaultPredicate always return true. In RBC, the predicate simply
+// allows to check that the message being broadcasted follow a given
+// predicate but has nothing to do with the logic of the protocol other
+// that if the predicate is not satisfied, the broadcast should be stopped
+func defaultPredicate([]byte) bool {
 	// For now, we don't care what this does
 	return true
 }
 
-func createTestNodeWithTimeouts(network *networking.FakeNetwork[[]byte], threshold, r, nbNodes,
-	mLen int, wTo, rTo time.Duration) *TestNode {
+func createTestNodeWithDelay(network *networking.FakeNetwork, threshold, r, nbNodes,
+	mLen int, delay time.Duration) *TestNode {
 	nIface := network.JoinNetwork()
-	stream := NewMockAuthStream(nIface, wTo, rTo)
+	network.DelayNode(nIface.GetID(), delay)
 	rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, rs, r, nIface.GetID()))
+	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
 	return node
 }
 
-func createTestNode(network *networking.FakeNetwork[[]byte], threshold, r, nbNodes, mLen int) *TestNode {
+func createDefaultNetworkTestNode(network *networking.FakeNetwork, mLen int) *TestNode {
+	threshold := 2
+	r := 2
+	nbNodes := 3*threshold + 1
 	nIface := network.JoinNetwork()
-	stream := NoDelayMockAuthStream(nIface)
 	rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-	node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream, rs, r, nIface.GetID()))
+	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
 	return node
 }
 
@@ -117,16 +84,13 @@ func generateMessage(l int) []byte {
 // if hashing to times in a row creates the same hash
 func TestFourRoundsRBC_FreshHash(t *testing.T) {
 	// Set up a fake network
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	// Randomly generate a message to hash
-	r := 2 // Reconstruction
-	threshold := 2
-	nbNodes := 3*threshold + 1
-	mLen := threshold + 1 // Length of the messages being sent
+	mLen := 3 // Length of the messages being sent
 	s := generateMessage(mLen)
 
-	node := createTestNode(network, threshold, r, nbNodes, mLen)
+	node := createDefaultNetworkTestNode(network, mLen)
 
 	h1, err := node.rbc.FreshHash(s)
 	require.NoError(t, err)
@@ -141,17 +105,16 @@ func TestFourRoundsRBC_FreshHash(t *testing.T) {
 func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 
 	// Set up a fake network
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Config
-	r := 2 // Reconstruction
 	threshold := 2
 	nbNodes := 3*threshold + 1
 	mLen := threshold + 1 // Length of the messages being sent
 
 	// Set up a node to test
-	node := createTestNode(network, threshold, r, nbNodes, mLen)
+	node := createDefaultNetworkTestNode(network, mLen)
 	go func() {
 		err := node.rbc.Listen(ctx)
 		require.Error(t, context.Canceled, err)
@@ -159,11 +122,11 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	interfaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
+	interfaces := make([]*networking.FakeInterface, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
-		startDummyNode(ctx, NoDelayMockAuthStream(iface))
+		startDummyNode(ctx, iface)
 	}
 
 	// Send a PROPOSE message to the test node and check that it answers correctly
@@ -262,16 +225,15 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 // then a READY is sent only once
 func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	// Set up a fake network
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Config
-	r := 2 // Reconstruction
 	threshold := 2
 	nbNodes := 3*threshold + 1
 
 	// Set up a node to test
-	node := createTestNode(network, threshold, r, nbNodes, 4)
+	node := createDefaultNetworkTestNode(network, 4)
 	go func() {
 		err := node.rbc.Listen(ctx)
 		require.Error(t, context.Canceled, err)
@@ -279,17 +241,17 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	interfaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
+	interfaces := make([]*networking.FakeInterface, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, NoDelayMockAuthStream(iface))
+		startDummyNode(ctx, iface)
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
 	hash := []byte{5, 6, 7, 8}
-	echoMsg := createEchoMessage(fakeMi, hash, node.rbc.id)
+	echoMsg := createEchoMessage(fakeMi, hash, node.rbc.nodeID)
 	echoBytes, err := proto.Marshal(echoMsg)
 	require.NoError(t, err)
 
@@ -378,16 +340,15 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 // encoding is received
 func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	// Set up a fake network
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Config
-	r := 2 // Reconstruction
 	threshold := 2
 	nbNodes := 3*threshold + 1
 
 	// Set up a node to test
-	node := createTestNode(network, threshold, r, nbNodes, 4)
+	node := createDefaultNetworkTestNode(network, 4)
 	go func() {
 		err := node.rbc.Listen(ctx)
 		require.Error(t, context.Canceled, err)
@@ -395,12 +356,12 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	interfaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
+	interfaces := make([]*networking.FakeInterface, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, NoDelayMockAuthStream(iface))
+		startDummyNode(ctx, iface)
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -501,16 +462,15 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 // here the node receives the ECHO messages before receiving the t+1 ready message
 func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	// Set up a fake network
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Config
-	r := 2 // Reconstruction
 	threshold := 2
 	nbNodes := 3*threshold + 1
 
 	// Set up a node to test
-	node := createTestNode(network, threshold, r, nbNodes, 4)
+	node := createDefaultNetworkTestNode(network, 4)
 	go func() {
 		err := node.rbc.Listen(ctx)
 		require.Error(t, context.Canceled, err)
@@ -518,12 +478,12 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	interfaces := make([]*networking.FakeInterface[[]byte], nbNodes-1)
+	interfaces := make([]*networking.FakeInterface, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
 		iface := network.JoinNetwork()
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, NoDelayMockAuthStream(iface))
+		startDummyNode(ctx, iface)
 	}
 
 	// Create a READY message
@@ -667,14 +627,14 @@ func runAndCheckRBC(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
 	checkRBCResult(t, nodes, nbNodes, msg)
 }
 
-// TestFourRoundsRBC_Simple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
-// Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
+// TestFourRoundsRBC_Simple creates a network with a threshold t=2 and n=3*t+1 nodes
+// and start a broadcast from one node. Wait until the algorithm finishes for all nodes
+// and verifies that everyone agreed on the same value.
 func TestFourRoundsRBC_Simple(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
@@ -684,7 +644,7 @@ func TestFourRoundsRBC_Simple(t *testing.T) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		nodes[i] = createTestNode(network, threshold, r, nbNodes, mLen)
+		nodes[i] = createDefaultNetworkTestNode(network, mLen)
 	}
 
 	// Run RBC and check the result
@@ -696,10 +656,9 @@ func TestFourRoundsRBC_Simple(t *testing.T) {
 // In this situation, 1 node is dead, and we expect the algorithm to finish for all nodes alive correctly.
 func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 	nbDead := 1
 
@@ -710,15 +669,15 @@ func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
 	// Set up the working nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes-nbDead; i++ {
-		nodes[i] = createTestNode(network, threshold, r, nbNodes, mLen)
+		nodes[i] = createDefaultNetworkTestNode(network, mLen)
 	}
 
 	// Set up the dead nodes
-	deadNodes := make([]*MockAuthStream, nbDead)
+	deadNodes := make([]networking.NetworkInterface, nbDead)
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := NoDelayMockAuthStream(network.JoinNetwork())
+		stream := network.JoinNetwork()
 		deadNodes[i] = stream
 	}
 
@@ -731,10 +690,9 @@ func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
 // In this situation, 2 nodes are dead, and we expect the algorithm to finish for all nodes alive correctly.
 func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 	nbDead := 2
 
@@ -745,15 +703,15 @@ func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
 	// Set up the working nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes-nbDead; i++ {
-		nodes[i] = createTestNode(network, threshold, r, nbNodes, mLen)
+		nodes[i] = createDefaultNetworkTestNode(network, mLen)
 	}
 
 	// Set up the dead nodes
-	deadNodes := make([]*MockAuthStream, nbDead)
+	deadNodes := make([]networking.NetworkInterface, nbDead)
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := NoDelayMockAuthStream(network.JoinNetwork())
+		stream := network.JoinNetwork()
 		deadNodes[i] = stream
 	}
 
@@ -765,12 +723,11 @@ func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
 // In this situation, 3 nodes are dead, and we expect the algorithm to never finish.
 func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	timeout := time.Second * 5 // Wait five seconds
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 	nbDead := 3
 
@@ -781,15 +738,15 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 	// Set up the working nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes-nbDead; i++ {
-		nodes[i] = createTestNode(network, threshold, r, nbNodes, mLen)
+		nodes[i] = createDefaultNetworkTestNode(network, mLen)
 	}
 
 	// Set up the dead nodes
-	deadNodes := make([]*MockAuthStream, nbDead)
+	deadNodes := make([]networking.NetworkInterface, nbDead)
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := NoDelayMockAuthStream(network.JoinNetwork())
+		stream := network.JoinNetwork()
 		deadNodes[i] = stream
 	}
 
@@ -806,12 +763,13 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 	require.Equal(t, ctx.Err(), context.DeadlineExceeded)
 }
 
-// TestFourRoundsRBC_SlowNode creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
-// In this situation, 1 node is slow i.e. it has some delay when reading and writing to the network. The broadcast
+// TestFourRoundsRBC_SlowNode creates a network with a threshold t=2 and n=3*t+1
+// nodes and start a broadcast from one node. In this situation, 1 node is slow
+// i.e. it has some delay when reading and writing to the network. The broadcast
 // should still work fine, only slowly.
 func TestFourRoundsRBC_SlowNode(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	threshold := 2
 	r := 2
@@ -826,12 +784,12 @@ func TestFourRoundsRBC_SlowNode(t *testing.T) {
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		if i >= nbNodes-nbSlow {
-			// Set up the slow nodes with half a second of delay when reading or writing
-			timeout := time.Millisecond * 500
-			nodes[i] = createTestNodeWithTimeouts(network, threshold, r, nbNodes, mLen, timeout, timeout)
+			// Set up the slow nodes with half a second of delay when sending packets
+			delay := time.Millisecond * 500
+			nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
 		} else {
 			// All other nodes don't have delay
-			nodes[i] = createTestNode(network, threshold, r, nbNodes, mLen)
+			nodes[i] = createDefaultNetworkTestNode(network, mLen)
 		}
 	}
 
@@ -839,12 +797,13 @@ func TestFourRoundsRBC_SlowNode(t *testing.T) {
 	runAndCheckRBC(t, nodes, nbNodes, s)
 }
 
-// TestFourRoundsRBC_SlowNode creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
-// In this situation, 3 node are slow i.e. they have some delay when reading and writing to the network. The broadcast
+// TestFourRoundsRBC_SlowNodes creates a network with a threshold t=2 and n=3*t+1
+// nodes and start a broadcast from one node. In this situation, 3 node are slow
+// i.e. they have some delay when reading and writing to the network. The broadcast
 // should still work fine, only slowly.
 func TestFourRoundsRBC_SlowNodes(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	threshold := 2
 	r := 2
@@ -859,11 +818,11 @@ func TestFourRoundsRBC_SlowNodes(t *testing.T) {
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		if i > nbNodes-nbSlow {
-			timeout := time.Millisecond * 500
-			nodes[i] = createTestNodeWithTimeouts(network, threshold, r, nbNodes, mLen, timeout, timeout)
+			delay := time.Millisecond * 500
+			nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
 		} else {
 			// All other nodes don't have delay
-			nodes[i] = createTestNode(network, threshold, r, nbNodes, mLen)
+			nodes[i] = createDefaultNetworkTestNode(network, mLen)
 		}
 	}
 
@@ -871,15 +830,41 @@ func TestFourRoundsRBC_SlowNodes(t *testing.T) {
 	runAndCheckRBC(t, nodes, nbNodes, s)
 }
 
-// TestFourRoundsRBC_DealAndDies creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
-// In this situation, the dealer deals and then dies immediately. We expect the algorithm to finish correctly for all other nodes.
+// TestFourRoundsRBC_SlowNodesStress create a network where all nodes
+// are slow in their communication. Except the protocol to finish normally
+// albeit slower
+func TestFourRoundsRBC_SlowNodesStress(t *testing.T) {
+	// Config
+	network := networking.NewFakeNetwork()
+
+	threshold := 4
+	r := 3
+	nbNodes := 3*threshold + 1
+	delay := time.Millisecond * 200
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen)
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
+	}
+
+	// Run and check RBC, it should work normally only slower
+	runAndCheckRBC(t, nodes, nbNodes, s)
+}
+
+// TestFourRoundsRBC_DealAndDies creates a network with a threshold t=2 and n=3*t+1
+// nodes and start a broadcast from one node. In this situation, the dealer deals
+// and then dies immediately. We expect the algorithm to finish correctly for all other nodes.
 func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
@@ -889,7 +874,7 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		nodes[i] = createTestNode(network, threshold, r, nbNodes, mLen)
+		nodes[i] = createDefaultNetworkTestNode(network, mLen)
 	}
 
 	// Set all nodes to listen except from one which will be the dead one
@@ -910,7 +895,7 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 
 	// Create a dying dealer. We don't need to actually create an RBC instance, we just need to send the PROPOSE
 	// from some node in the network and never answer after that
-	dyingDealer := NoDelayMockAuthStream(network.JoinNetwork())
+	dyingDealer := network.JoinNetwork()
 
 	// Start RBC from the dying dealer
 	inst := createProposeMessage(s)
@@ -932,17 +917,13 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 // TestFourRoundsRBC_testStop tests that calling the Stop method on a node after having called the broadcast
 // or listen function returns without error
 func TestFourRoundsRBC_testStop(t *testing.T) {
-	network := networking.NewFakeNetwork[[]byte]()
-
-	threshold := 2
-	r := 2
-	nbNodes := 3*threshold + 1
+	network := networking.NewFakeNetwork()
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
+	mLen := 3 // Arbitrary message length
 	s := generateMessage(mLen)
 
-	node := createTestNode(network, threshold, r, nbNodes, mLen)
+	node := createDefaultNetworkTestNode(network, mLen)
 
 	// Listen on the node in a go routine and expect it to cancel the context before the timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
@@ -978,7 +959,7 @@ func TestFourRoundsRBC_testStop(t *testing.T) {
 // is called on the dealer
 func TestFourRoundsRBC_DealAndStop(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	threshold := 2
@@ -993,7 +974,8 @@ func TestFourRoundsRBC_DealAndStop(t *testing.T) {
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		// Add a bit of delay when reading to leave time for the dealer node to be stopped
-		nodes[i] = createTestNodeWithTimeouts(network, threshold, r, nbNodes, mLen, time.Millisecond*10, 0)
+		delay := time.Millisecond * 10
+		nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
 	}
 
 	// Set all nodes to listen except from one which will be the dealer
@@ -1041,7 +1023,7 @@ func TestFourRoundsRBC_DealAndStop(t *testing.T) {
 // stopped and not the dealer
 func TestFourRoundsRBC_ListenerDies(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	threshold := 2
@@ -1056,7 +1038,8 @@ func TestFourRoundsRBC_ListenerDies(t *testing.T) {
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		// Add a bit of delay when reading to leave time for the dealer node to be stopped
-		nodes[i] = createTestNodeWithTimeouts(network, threshold, r, nbNodes, mLen, time.Millisecond*10, 0)
+		delay := time.Millisecond * 10
+		nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
 	}
 
 	// Set all nodes to listen except from one which will be the dealer and the one that will fail
@@ -1112,7 +1095,7 @@ func TestFourRoundsRBC_ListenerDies(t *testing.T) {
 // stopped and not the dealer
 func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	threshold := 2
@@ -1128,7 +1111,8 @@ func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		// Add a bit of delay when reading to leave time for the dealer node to be stopped
-		nodes[i] = createTestNodeWithTimeouts(network, threshold, r, nbNodes, mLen, time.Millisecond*10, 0)
+		delay := time.Millisecond * 10
+		nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
 	}
 
 	// Set all nodes to listen except from one which will be the dealer and the one that will fail
@@ -1187,14 +1171,15 @@ func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
 	cancel()
 }
 
-// TestFourRoundsRBC_Stress creates a network with a threshold t=20 and n=3*t+1 nodes and start a broadcast from one node.
-// Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
+// TestFourRoundsRBC_Stress creates a network with a threshold t=20 and n=3*t+1
+// nodes and start a broadcast from one node. Wait until the algorithm finishes
+// for all nodes and verifies that everyone agreed on the same value.
 func TestFourRoundsRBC_Stress(t *testing.T) {
 	// Config
-	network := networking.NewFakeNetwork[[]byte]()
+	network := networking.NewFakeNetwork()
 
 	threshold := 20
-	r := 2
+	r := 3
 	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
@@ -1204,10 +1189,11 @@ func TestFourRoundsRBC_Stress(t *testing.T) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		stream := NoDelayMockAuthStream(network.JoinWithBuffer(4000))
+		// Create a custom node with a special sized buffer
+		iface := network.JoinWithBuffer(4000)
 		rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-		node := NewTestNode(stream, NewFourRoundRBC(pred, sha256.New(), threshold, stream,
-			rs, r, stream.Network.GetID()))
+		node := NewTestNode(iface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, iface,
+			rs, r, iface.GetID()))
 		nodes[i] = node
 	}
 

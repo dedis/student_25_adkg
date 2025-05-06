@@ -5,9 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/rs/zerolog"
-	"golang.org/x/xerrors"
-	"google.golang.org/protobuf/proto"
 	"hash"
 	"os"
 	"strconv"
@@ -16,6 +13,10 @@ import (
 	"student_25_adkg/reedsolomon"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"golang.org/x/xerrors"
+	"google.golang.org/protobuf/proto"
 )
 
 // Define the logger
@@ -25,43 +26,43 @@ var (
 		TimeFormat: time.RFC3339,
 		// Format the node ID
 		FormatPrepare: func(e map[string]interface{}) error {
-			e["id"] = fmt.Sprintf("[%s]", e["id"])
+			e["nodeID"] = fmt.Sprintf("[%s]", e["nodeID"])
 			return nil
 		},
 		// Change the order in which things appear
 		PartsOrder: []string{
 			zerolog.TimestampFieldName,
 			zerolog.LevelFieldName,
-			"id",
+			"nodeID",
 			zerolog.MessageFieldName,
 		},
-		// Prevent the id from being printed again
-		FieldsExclude: []string{"id"},
+		// Prevent the nodeID from being printed again
+		FieldsExclude: []string{"nodeID"},
 	}
 )
 
 type FourRoundRBC struct {
-	iface rbc.AuthenticatedMessageStream
-	pred  func([]byte) bool
+	iface     rbc.AuthenticatedMessageStream
+	predicate func([]byte) bool
 	hash.Hash
 	rs        reedsolomon.RSCodes
 	threshold int
 	sentReady bool
 	sync.RWMutex
-	echoCount   map[string]int
-	readyCounts map[string]int
-	readyMis    map[string]map[string]struct{}
-	th          []reedsolomon.Encoding
-	r           int
-	finalValue  []byte
-	finished    bool
-	log         zerolog.Logger
-	id          int64
+	echoCount           map[string]int
+	readyCounts         map[string]int
+	readyEncodingShares map[string]map[string]struct{}
+	th                  []reedsolomon.Encoding
+	r                   int
+	finalValue          []byte
+	finished            bool
+	log                 zerolog.Logger
+	nodeID              int64
 }
 
-func NewFourRoundRBC(pred func([]byte) bool, h hash.Hash, threshold int,
+func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 	iface rbc.AuthenticatedMessageStream,
-	rs reedsolomon.RSCodes, r int, id int64) *FourRoundRBC {
+	rs reedsolomon.RSCodes, r int, nodeID int64) *FourRoundRBC {
 
 	// Disable logging based on the GLOG environment variable
 	var logLevel zerolog.Level
@@ -75,26 +76,26 @@ func NewFourRoundRBC(pred func([]byte) bool, h hash.Hash, threshold int,
 		Level(logLevel).
 		With().
 		Timestamp().
-		Str("id", strconv.Itoa(int(id))).
+		Str("nodeID", strconv.Itoa(int(nodeID))).
 		Logger()
 
 	return &FourRoundRBC{
-		iface:       iface,
-		pred:        pred,
-		Hash:        h,
-		rs:          rs,
-		threshold:   threshold,
-		sentReady:   false,
-		RWMutex:     sync.RWMutex{},
-		echoCount:   make(map[string]int),
-		readyCounts: make(map[string]int),
-		readyMis:    make(map[string]map[string]struct{}),
-		th:          make([]reedsolomon.Encoding, 0),
-		r:           r,
-		finalValue:  nil,
-		finished:    false,
-		log:         logger,
-		id:          id,
+		iface:               iface,
+		predicate:           predicate,
+		Hash:                h,
+		rs:                  rs,
+		threshold:           threshold,
+		sentReady:           false,
+		RWMutex:             sync.RWMutex{},
+		echoCount:           make(map[string]int),
+		readyCounts:         make(map[string]int),
+		readyEncodingShares: make(map[string]map[string]struct{}),
+		th:                  make([]reedsolomon.Encoding, 0),
+		r:                   r,
+		finalValue:          nil,
+		finished:            false,
+		log:                 logger,
+		nodeID:              nodeID,
 	}
 }
 
@@ -116,15 +117,17 @@ func (f *FourRoundRBC) broadcast(bs []byte) error {
 	return err
 }
 
-func (f *FourRoundRBC) start(ctx context.Context, success, stopped chan struct{}) {
+// start listens for packet on the interface and handles them. Returns a channel that will
+// // return nil when the protocol finishes or an error if it stopped or any other reason
+func (f *FourRoundRBC) start(ctx context.Context) chan error {
+	returnChan := make(chan error)
 	go func() {
 		for {
 			bs, err := f.iface.Receive(ctx)
 			if err != nil {
-				// Check if the error is that the "receive" was stop via the channel or not
+				// Stop looping if the context was stopped
 				if errors.Is(err, context.Canceled) {
-					// The channel was stopped so we just return
-					close(stopped)
+					returnChan <- err
 					return
 				}
 				f.log.Err(err).Msg("Error receiving message")
@@ -144,17 +147,16 @@ func (f *FourRoundRBC) start(ctx context.Context, success, stopped chan struct{}
 			}
 			if finished {
 				f.log.Err(err).Msg("Protocol terminated")
-				close(success)
+				returnChan <- err
 				return
 			}
 		}
 	}()
+	return returnChan
 }
 
 func (f *FourRoundRBC) RBroadcast(ctx context.Context, m []byte) error {
-	successChan := make(chan struct{})
-	stoppedChan := make(chan struct{})
-	f.start(ctx, successChan, stoppedChan)
+	finishedChan := f.start(ctx)
 
 	// Send the broadcast
 	err := f.broadcast(m)
@@ -162,25 +164,15 @@ func (f *FourRoundRBC) RBroadcast(ctx context.Context, m []byte) error {
 		return err
 	}
 
-	select {
-	case <-successChan:
-		return nil
-	case <-stoppedChan:
-		return context.Canceled
-	}
+	err = <-finishedChan
+	return err
 }
 
 func (f *FourRoundRBC) Listen(ctx context.Context) error {
-	successChan := make(chan struct{})
-	stoppedChan := make(chan struct{})
-	f.start(ctx, successChan, stoppedChan)
+	finishedChan := f.start(ctx)
 
-	select {
-	case <-successChan:
-		return nil
-	case <-stoppedChan:
-		return context.Canceled
-	}
+	err := <-finishedChan
+	return err
 }
 
 func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (bool, error) {
@@ -191,7 +183,7 @@ func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (bool, e
 		f.log.Info().Msg("Received propose message")
 		err = f.receivePropose(op.ProposeInst)
 	case *typedefs.Message_EchoInst:
-		f.log.Info().Msgf("Received echo message with id %d and msg: %x", op.EchoInst.I, op.EchoInst.Mi)
+		f.log.Info().Msgf("Received echo message with nodeID %d and msg: %x", op.EchoInst.I, op.EchoInst.Mi)
 		err = f.receiveEcho(op.EchoInst)
 	case *typedefs.Message_ReadyInst:
 		f.log.Info().Msg("Received ready message")
@@ -204,8 +196,8 @@ func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (bool, e
 }
 
 func (f *FourRoundRBC) receivePropose(msg *typedefs.Message_Propose) error {
-	if !f.pred(msg.GetContent()) {
-		return xerrors.New("Given value did not pass the predicate")
+	if !f.predicate(msg.GetContent()) {
+		return rbc.PredicateRejectedError
 	}
 
 	// Hash the value
@@ -237,19 +229,15 @@ func (f *FourRoundRBC) receiveEcho(msg *typedefs.Message_Echo) error {
 	defer f.Unlock()
 
 	// Ignore ECHO message that are not for our index
-	if msg.GetI() != f.id {
+	if msg.GetI() != f.nodeID {
 		return nil
 	}
 
-	// Count this message and check if we need to send a READY message
 	count, ok := f.echoCount[string(msg.GetH())]
-	// Update the count
 	if !ok {
 		count = 0
 	}
 	count++
-
-	// Update the count
 	f.echoCount[string(msg.GetH())] = count
 
 	// If the hash has received enough READY messages, then the threshold only needs be t+1
@@ -257,10 +245,8 @@ func (f *FourRoundRBC) receiveEcho(msg *typedefs.Message_Echo) error {
 	if !ok {
 		readyCount = 0
 	}
-	hashReady := f.checkReadyThreshold(readyCount)
-
-	// Check if we received enough (taking into account if we already received enough ready messages for that hash)
-	sendReady := f.checkEchoThreshold(count, hashReady) && !f.sentReady
+	readyThreshold := f.checkReadyThreshold(readyCount)
+	sendReady := f.checkEchoThreshold(count, readyThreshold) && !f.sentReady
 
 	if !sendReady {
 		return nil
@@ -281,17 +267,13 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 	f.Lock()
 	defer f.Unlock()
 
-	// Update the count of ready messages received for that hash and check if a READY message needs to be sent
 	count, ok := f.readyCounts[string(msg.GetH())]
 	if !ok {
 		count = 0
 	}
 	count++
-	// Update the count
 	f.readyCounts[string(msg.GetH())] = count
 
-	// If enough READY messages have been received and enough ECHO messages, then send a READY message
-	// if not already sent
 	echoes, ok := f.echoCount[string(msg.GetH())]
 	sendReady := ok && !f.sentReady && f.checkReadyThreshold(count) && f.checkReadyThreshold(echoes)
 
@@ -307,22 +289,8 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 		f.log.Printf("Sent Ready message for %x", msg.GetMi())
 	}
 
-	var value []byte
-	hashMis, ok := f.readyMis[string(msg.GetH())]
+	firstTime := f.addReadyEncodingShareIfFirstTimeSeen(string(msg.GetH()), string(msg.GetMi()))
 
-	if !ok {
-		hashMis = make(map[string]struct{})
-	}
-	_, notFirst := hashMis[string(msg.GetMi())]
-	firstTime := !notFirst
-
-	// Put the value in the map
-	hashMis[string(msg.GetMi())] = struct{}{}
-	// Update the map
-	f.readyMis[string(msg.GetH())] = hashMis
-
-	finished := false
-	var err error
 	// If this value is seen for the first time, add it to T_h and try to reconstruct
 	if firstTime {
 		f.log.Printf("Received first ready message for %x", msg.GetMi())
@@ -333,19 +301,37 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 		f.log.Printf("Got %d messges in th", len(f.th))
 		// Try to reconstruct
 
-		value, finished, err = f.reconstruct(msg.GetH())
+		value, finished, err := f.reconstruct(msg.GetH())
 		if err != nil {
 			f.log.Printf("Failed to reconstruct: %v", err)
 		}
-	}
-
-	if finished {
-		f.finalValue = value
-		f.finished = true
-		return true, nil
+		if finished {
+			f.finalValue = value
+			f.finished = true
+			return true, nil
+		}
 	}
 
 	return false, nil
+}
+
+// addReadyEncodingShareIfFirstTimeSeen chek if the given share of the encoding corresponding
+// to the hashed message has already been received. If not, mark as received. Return
+// true if it was the first time. False otherwise and nothing happens
+func (f *FourRoundRBC) addReadyEncodingShareIfFirstTimeSeen(messageHash, encodingShare string) bool {
+	hashEncodingShare, ok := f.readyEncodingShares[messageHash]
+
+	if !ok {
+		hashEncodingShare = make(map[string]struct{})
+	}
+	_, notFirst := hashEncodingShare[encodingShare]
+
+	// Put the value in the map
+	hashEncodingShare[encodingShare] = struct{}{}
+	// Update the map
+	f.readyEncodingShares[messageHash] = hashEncodingShare
+
+	return !notFirst
 }
 
 func (f *FourRoundRBC) reconstruct(expHash []byte) ([]byte, bool, error) {

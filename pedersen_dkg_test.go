@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/group/edwards25519"
@@ -10,7 +12,6 @@ import (
 	"go.dedis.ch/kyber/v4/sign/eddsa"
 	"go.dedis.ch/kyber/v4/sign/schnorr"
 	"go.dedis.ch/kyber/v4/util/random"
-	"testing"
 )
 
 type TestNode struct {
@@ -20,11 +21,11 @@ type TestNode struct {
 	dkg     *dkg.DistKeyGenerator
 }
 
-func NewTestNode(s dkg.Suite, index int) *TestNode {
+func NewTestNode(s dkg.Suite, index uint32) *TestNode {
 	private := s.Scalar().Pick(random.New())
 	public := s.Point().Mul(private, nil)
 	return &TestNode{
-		Index:   uint32(index),
+		Index:   index,
 		Private: private,
 		Public:  public,
 	}
@@ -32,8 +33,10 @@ func NewTestNode(s dkg.Suite, index int) *TestNode {
 
 func GenerateTestNodes(s dkg.Suite, n int) []*TestNode {
 	tns := make([]*TestNode, n)
+	id := uint32(0)
 	for i := 0; i < n; i++ {
-		tns[i] = NewTestNode(s, i)
+		tns[i] = NewTestNode(s, id)
+		id++
 	}
 	return tns
 }

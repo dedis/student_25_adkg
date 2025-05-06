@@ -7,9 +7,9 @@ message Message{
   }
 
   message Echo{
-    bytes mi=1;
+    bytes mix=1;
     bytes h=2;
-    int64  i=3;
+    int64 i=3;
   }
 
   message Ready{

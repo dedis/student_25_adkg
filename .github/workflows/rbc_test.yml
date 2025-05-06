@@ -2,7 +2,7 @@ name: RBC Test
 
 on:
   push:
-    branches: [ rbc ]
+    branches: [ main ]
   pull_request: 
     types:
       - opened
@@ -38,7 +38,7 @@ jobs:
           mkdir -p ./${{ github.run_attempt }}
       
       - name: run RBC Bracha tests
-        run: go test -json -v -race -run TestBrachaRBC ./rbc/bracha | gotestfmt
+        run: go test -json -v -race ./rbc/bracha/... | gotestfmt
 
       - name: run RBC FourRounds tests
-        run: go test -json -timeout 20m -v -race -run TestFourRoundsRBC ./rbc/fourrounds | gotestfmt
+        run: go test -json -timeout 20m -v -race ./rbc/fourrounds/... | gotestfmt

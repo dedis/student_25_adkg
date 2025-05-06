@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/rs/zerolog"
-	"go.dedis.ch/protobuf"
 	"os"
 	"strconv"
 	"student_25_adkg/rbc"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"go.dedis.ch/protobuf"
 )
 
 // Define the logger
@@ -20,25 +21,25 @@ var (
 		TimeFormat: time.RFC3339,
 		// Format the node ID
 		FormatPrepare: func(e map[string]interface{}) error {
-			e["id"] = fmt.Sprintf("[%s]", e["id"])
+			e["nodeID"] = fmt.Sprintf("[%s]", e["nodeID"])
 			return nil
 		},
 		// Change the order in which things appear
 		PartsOrder: []string{
 			zerolog.TimestampFieldName,
 			zerolog.LevelFieldName,
-			"id",
+			"nodeID",
 			zerolog.MessageFieldName,
 		},
-		// Prevent the id from being printed again
-		FieldsExclude: []string{"id"},
+		// Prevent the nodeID from being printed again
+		FieldsExclude: []string{"nodeID"},
 	}
 )
 
 // RBC implements Bracha RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
 type RBC struct {
 	iface      rbc.AuthenticatedMessageStream
-	pred       func(bool) bool
+	predicate  func(bool) bool
 	stopChan   chan struct{}
 	echoCount  int
 	readyCount int
@@ -46,14 +47,13 @@ type RBC struct {
 	sentReady  bool
 	finished   bool
 	value      bool
-	id         uint32
+	nodeID     int64
 	logger     zerolog.Logger
 	sync.RWMutex
 }
 
-// NewBrachaRBC creates a new BrachaRBC structure. The marshal un unmarshal methods are used to convert the content
-// of the RBCMessage to and from the value type M
-func NewBrachaRBC(pred func(bool) bool, threshold int, iface rbc.AuthenticatedMessageStream, id uint32) *RBC {
+// NewBrachaRBC creates a new BrachaRBC structure
+func NewBrachaRBC(predicate func(bool) bool, threshold int, iface rbc.AuthenticatedMessageStream, nodeID int64) *RBC {
 	// Disable logging based on the GLOG environment variable
 	var logLevel zerolog.Level
 	if os.Getenv("GLOG") == "no" {
@@ -66,11 +66,11 @@ func NewBrachaRBC(pred func(bool) bool, threshold int, iface rbc.AuthenticatedMe
 		Level(logLevel).
 		With().
 		Timestamp().
-		Str("id", strconv.Itoa(int(id))).
+		Str("nodeID", strconv.Itoa(int(nodeID))).
 		Logger()
 
 	return &RBC{
-		pred:       pred,
+		predicate:  predicate,
 		iface:      iface,
 		stopChan:   make(chan struct{}),
 		echoCount:  0,
@@ -80,7 +80,7 @@ func NewBrachaRBC(pred func(bool) bool, threshold int, iface rbc.AuthenticatedMe
 		finished:   false,
 		RWMutex:    sync.RWMutex{},
 		logger:     logger,
-		id:         id,
+		nodeID:     nodeID,
 	}
 }
 
@@ -93,12 +93,17 @@ func (b *RBC) sendMsg(msg *Message) error {
 	return err
 }
 
-func (b *RBC) start(ctx context.Context, finishedChan chan struct{}) {
+// start listens for packets on the interface and handles them. Returns a channel that will
+// return nil when the protocol finishes or an error if it stopped or any other reason
+func (b *RBC) start(ctx context.Context) chan error {
+	finishedChan := make(chan error)
 	go func() {
 		for {
 			bs, err := b.iface.Receive(ctx)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
+					b.logger.Warn().Err(err).Msg("context canceled")
+					finishedChan <- err
 					return
 				}
 				b.logger.Error().Err(err).Msg("error receiving message")
@@ -118,16 +123,18 @@ func (b *RBC) start(ctx context.Context, finishedChan chan struct{}) {
 			if finished {
 				b.finished = true
 				b.value = msg.Content
-				close(finishedChan)
+				finishedChan <- nil
+				b.logger.Info().Msg("Protocol finished")
+				return
 			}
 		}
 	}()
+	return finishedChan
 }
 
 // RBroadcast implements the method from the RBC interface
 func (b *RBC) RBroadcast(ctx context.Context, content bool) error {
-	finishedChan := make(chan struct{})
-	b.start(ctx, finishedChan)
+	finishedChan := b.start(ctx)
 
 	err := b.startBroadcast(content)
 	if err != nil {
@@ -135,19 +142,18 @@ func (b *RBC) RBroadcast(ctx context.Context, content bool) error {
 	}
 
 	// Wait for the protocol to finish
-	<-finishedChan
-
-	return nil
+	err = <-finishedChan
+	close(finishedChan)
+	return err
 }
 
 func (b *RBC) Listen(ctx context.Context) error {
-	finishedChan := make(chan struct{})
-	b.start(ctx, finishedChan)
+	finishedChan := b.start(ctx)
 
 	// Wait for the protocol to finish
-	<-finishedChan
-
-	return nil
+	err := <-finishedChan
+	close(finishedChan)
+	return err
 }
 
 func (b *RBC) startBroadcast(val bool) error {
@@ -181,32 +187,27 @@ func (b *RBC) handleMsg(message Message) (bool, error) {
 		if err != nil {
 			return finished, err
 		}
+		if t == READY {
+			b.sentReady = true
+		}
 	}
 	return finished, nil
 }
 
 // receivePropose handles the logic necessary when a PROPOSE message is received
 func (b *RBC) receivePropose(s bool) (echo bool) {
-	// If the predicate match, return that an echo message should be broadcast
-	return b.pred(s)
+	return b.predicate(s)
 }
 
 // receiveEcho handles the logic necessary when a ECHO message is received
 func (b *RBC) receiveEcho(s bool) (ready bool) {
 	b.Lock()
 	defer b.Unlock()
-	// Don't do anything if the value doesn't match the predicate or the RBC protocol finished
-	if !b.pred(s) || b.finished {
+	if !b.predicate(s) || b.finished {
 		return b.echoCount >= 2*b.threshold+1
 	}
-	// Increment the count of echo messages received
 	b.echoCount++
-	// Send a ready message if we have received 2t+1 ECHO messages and have not sent yet a ready message
-	ready = b.echoCount > 2*b.threshold && !b.sentReady
-	// If a ready message is going to be sent, set the sentReady bool to true to prevent sending more
-	if ready {
-		b.sentReady = true
-	}
+	ready = checkEchoThreshold(b.echoCount, b.threshold) && !b.sentReady
 	return ready
 }
 
@@ -215,28 +216,29 @@ func (b *RBC) receiveEcho(s bool) (ready bool) {
 func (b *RBC) receiveReady(s bool) (finished bool, ready bool) {
 	b.RLock()
 	defer b.RUnlock()
-	// Don't do anything if the value doesn't match the predicate of the RBC protocol finished
-	if !b.pred(s) || b.finished {
+	if !b.predicate(s) || b.finished {
 		return false, false
 	}
-	// Increment the count of READY messages received
 	b.readyCount++
+	ready = checkReadyThreshold(b.readyCount, b.threshold) && !b.sentReady
 
-	// Send a READY message if we have received enough READY messages
-	// and a READY message has not yet been sent by this node
-	ready = b.readyCount > b.threshold && !b.sentReady
-	// If ready, then mark that this node has sent a ready message
-	if ready {
-		b.sentReady = true
-	}
-
-	// Finish if we have received enough ready messages
 	finished = b.readyCount > 2*b.threshold
-	// if finishing, then set the value and the finished bool in the struct
 	if finished {
 		b.finished = true
 		b.value = s
 	}
 
 	return finished, ready
+}
+
+// checkReadyThreshold checks if the number of READY messages has
+// reached the required threshold
+func checkReadyThreshold(readyCount, threshold int) bool {
+	return readyCount > threshold
+}
+
+// checkEchoThreshold checks if the number of ECHO messages has
+// reached the required threshold
+func checkEchoThreshold(echoCount, threshold int) bool {
+	return echoCount > 2*threshold
 }

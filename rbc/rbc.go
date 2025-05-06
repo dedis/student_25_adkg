@@ -36,4 +36,4 @@ type RBC[T any] interface {
 	Listen(ctx context.Context) error
 }
 
-var PredicateRejectedError = errors.New("predicate rejected")
+var ErrPredicateRejected = errors.New("predicate rejected")

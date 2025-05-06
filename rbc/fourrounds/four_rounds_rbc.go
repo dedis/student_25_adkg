@@ -197,7 +197,7 @@ func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (bool, e
 
 func (f *FourRoundRBC) receivePropose(msg *typedefs.Message_Propose) error {
 	if !f.predicate(msg.GetContent()) {
-		return rbc.PredicateRejectedError
+		return rbc.ErrPredicateRejected
 	}
 
 	// Hash the value

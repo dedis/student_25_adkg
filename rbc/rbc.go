@@ -36,15 +36,4 @@ type RBC[T any] interface {
 	Listen(ctx context.Context) error
 }
 
-// NodeStoppedError is used when the Listen or RBroadcast methods are stopped via
-// the Stop method.
-type NodeStoppedError struct{}
-
-func (err NodeStoppedError) Error() string {
-	return "node stopped"
-}
-func (err NodeStoppedError) Is(target error) bool {
-	var nodeStoppedError NodeStoppedError
-	ok := errors.As(target, &nodeStoppedError)
-	return ok
-}
+var PredicateRejectedError = errors.New("predicate rejected")

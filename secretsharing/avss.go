@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"student_25_adkg/logging"
-	"student_25_adkg/marshalling"
 	"student_25_adkg/rbc"
 	"student_25_adkg/rbc/fourrounds"
 	"student_25_adkg/reedsolomon"
@@ -19,6 +18,8 @@ import (
 	"golang.org/x/xerrors"
 	"google.golang.org/protobuf/proto"
 )
+
+var Uint32Size = 4
 
 type SecretShare interface {
 	Share(context.Context, kyber.Scalar) error
@@ -42,6 +43,7 @@ type AVSS struct {
 }
 
 func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream) *AVSS {
+	registerPointAndScalarProtobufInterfaces(conf.g)
 	return &AVSS{
 		conf:         conf,
 		logger:       logging.GetLogger(nodeID),
@@ -49,6 +51,17 @@ func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream) *
 		nodeID:       nodeID,
 		iface:        stream,
 	}
+}
+
+// registerPointAndScalarProtobufInterfaces registers the kyber.Point and kyber.Scalar interfaces
+// into protobuf so that they can be encoded and decoded. Needs to be called only once
+func registerPointAndScalarProtobufInterfaces(g kyber.Group) {
+	protobuf.RegisterInterface(func() interface{} {
+		return g.Point()
+	})
+	protobuf.RegisterInterface(func() interface{} {
+		return g.Scalar()
+	})
 }
 
 func PedPolyCommit(p *share.PriPoly, t int, conf Config) (*share.PubPoly, []*share.PriShare, []*share.PriShare) {
@@ -101,12 +114,12 @@ type Deal struct {
 	ri  *share.PriShare
 }
 
-func dealToShareInstruction(deal *Deal, g kyber.Group) (*typedefs.Instruction, error) {
-	siBytes, err := marshalling.MarshalPriShare(deal.si)
+func dealToShareInstruction(deal *Deal) (*typedefs.Instruction, error) {
+	siBytes, err := protobuf.Encode(deal.si)
 	if err != nil {
 		return nil, err
 	}
-	riBytes, err := marshalling.MarshalPriShare(deal.ri)
+	riBytes, err := protobuf.Encode(deal.ri)
 	if err != nil {
 		return nil, err
 	}
@@ -116,12 +129,14 @@ func dealToShareInstruction(deal *Deal, g kyber.Group) (*typedefs.Instruction, e
 	return inst, nil
 }
 
-func shareMessageToDeal(shareMsg *typedefs.Message_Share, g kyber.Group) (*Deal, error) {
-	si, err := marshalling.UnmarshalPriShare(shareMsg.GetSi(), g)
+func shareMessageToDeal(shareMsg *typedefs.Message_Share) (*Deal, error) {
+	si := &share.PriShare{}
+	err := protobuf.Decode(shareMsg.GetSi(), si)
 	if err != nil {
 		return nil, err
 	}
-	ri, err := marshalling.UnmarshalPriShare(shareMsg.GetRi(), g)
+	ri := &share.PriShare{}
+	err = protobuf.Decode(shareMsg.GetRi(), ri)
 	if err != nil {
 		return nil, err
 	}
@@ -133,8 +148,31 @@ func shareMessageToDeal(shareMsg *typedefs.Message_Share, g kyber.Group) (*Deal,
 	}, nil
 }
 
+func decodePubShares(bs []byte, g kyber.Group) ([]*share.PubShare, error) {
+	pointSize := g.Point().MarshalSize()
+	shareSize := pointSize + Uint32Size
+
+	//
+	shares := make([]*share.PubShare, 0)
+	start := 0
+	for start <= len(bs)-shareSize {
+		shareBytes := bs[start : start+shareSize]
+		s := &share.PubShare{}
+		err := protobuf.Decode(shareBytes, s)
+		if err != nil {
+			return nil, err
+		}
+		shares = append(shares, s)
+
+		start = start + shareSize
+	}
+
+	return shares, nil
+}
+
 func (a *AVSS) predicate(bs []byte) bool {
-	shares, err := marshalling.UnmarshalPubShares(bs, a.conf.g)
+
+	shares, err := decodePubShares(bs, a.conf.g)
 	if err != nil {
 		return false
 	}
@@ -159,7 +197,7 @@ func (a *AVSS) sendShares(sShares, rShares []*share.PriShare) error {
 			si: sShares[i],
 			ri: rShares[i],
 		}
-		inst, err := dealToShareInstruction(d, a.conf.g)
+		inst, err := dealToShareInstruction(d)
 		if err != nil {
 			return err
 		}
@@ -185,7 +223,7 @@ func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 	rs := reedsolomon.NewBWCodes(a.conf.t, a.conf.n)
 	fourRoundRBC := fourrounds.NewFourRoundRBC(a.predicate, sha256.New(), a.conf.t, a.iface, rs, 2, a.nodeID)
 
-	commitBytes, err := marshalling.MarshalPubShares(commit.Shares(a.conf.n))
+	commitBytes, err := protobuf.Encode(commit.Shares(a.conf.n))
 	if err != nil {
 		return err
 	}
@@ -202,19 +240,19 @@ func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 	return nil
 }
 
-func (a *AVSS) Listen(ctx context.Context) error {
+func (a *AVSS) Listen(ctx context.Context) (kyber.Scalar, error) {
 	rs := reedsolomon.NewBWCodes(a.conf.t, a.conf.n)
 	fourRoundsRBC := fourrounds.NewFourRoundRBC(a.predicate, sha256.New(), a.conf.t, a.iface, rs, 2, a.nodeID)
 
 	// Wait for an RBC instance to finish
 	err := fourRoundsRBC.Listen(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// TODO reconstruction phase
 
-	return nil
+	return nil, nil
 }
 
 // start listens for packets on the interface and handles them. Returns a channel that will
@@ -268,7 +306,7 @@ func (a *AVSS) receiveShare(shareMsg *typedefs.Message_Share) error {
 		return nil
 	}
 
-	deal, err := shareMessageToDeal(shareMsg, a.conf.g)
+	deal, err := shareMessageToDeal(shareMsg)
 	if err != nil {
 		return err
 	}

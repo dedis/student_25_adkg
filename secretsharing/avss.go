@@ -2,13 +2,10 @@ package secretsharing
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"student_25_adkg/logging"
 	"student_25_adkg/pedersencommitment"
 	"student_25_adkg/rbc"
-	"student_25_adkg/rbc/fourrounds"
-	"student_25_adkg/reedsolomon"
 	"student_25_adkg/secretsharing/typedefs"
 
 	"github.com/rs/zerolog"
@@ -39,11 +36,12 @@ type AVSS struct {
 	nodeID       int64
 	conf         Config
 	iface        rbc.AuthenticatedMessageStream
+	rbc          rbc.RBC[[]byte]
 	logger       zerolog.Logger
 	shareChannel chan *Deal
 }
 
-func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream) *AVSS {
+func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc rbc.RBC[[]byte]) *AVSS {
 	registerPointAndScalarProtobufInterfaces(conf.g)
 	return &AVSS{
 		conf:         conf,
@@ -51,6 +49,7 @@ func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream) *
 		shareChannel: make(chan *Deal),
 		nodeID:       nodeID,
 		iface:        stream,
+		rbc:          rbc,
 	}
 }
 
@@ -184,15 +183,12 @@ func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 		return err
 	}
 
-	rs := reedsolomon.NewBWCodes(a.conf.t, a.conf.n)
-	fourRoundRBC := fourrounds.NewFourRoundRBC(a.predicate, sha256.New(), a.conf.t, a.iface, rs, 2, a.nodeID)
-
 	commitBytes, err := encodeCommitment(commit)
 	if err != nil {
 		return err
 	}
 
-	err = fourRoundRBC.RBroadcast(ctx, commitBytes)
+	err = a.rbc.RBroadcast(ctx, commitBytes)
 	if err != nil {
 		return err
 	}
@@ -205,11 +201,8 @@ func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 }
 
 func (a *AVSS) Listen(ctx context.Context) (kyber.Scalar, error) {
-	rs := reedsolomon.NewBWCodes(a.conf.t, a.conf.n)
-	fourRoundsRBC := fourrounds.NewFourRoundRBC(a.predicate, sha256.New(), a.conf.t, a.iface, rs, 2, a.nodeID)
-
 	// Wait for an RBC instance to finish
-	err := fourRoundsRBC.Listen(ctx)
+	err := a.rbc.Listen(ctx)
 	if err != nil {
 		return nil, err
 	}

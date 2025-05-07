@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"student_25_adkg/logging"
+	"student_25_adkg/pedersencommitment"
 	"student_25_adkg/rbc"
 	"student_25_adkg/rbc/fourrounds"
 	"student_25_adkg/reedsolomon"
@@ -64,50 +65,6 @@ func registerPointAndScalarProtobufInterfaces(g kyber.Group) {
 	})
 }
 
-func PedPolyCommit(p *share.PriPoly, t int, conf Config) (*share.PubPoly, []*share.PriShare, []*share.PriShare) {
-	phi := share.NewPriPoly(conf.g, t, nil, random.New())
-
-	// Compute g0^p(x)
-	pCommit := p.Commit(conf.g0)
-	// Compute g1^phi(x)
-	pHatCommit := phi.Commit(conf.g1)
-
-	// Compute g0^p(x)g1^phi(x)
-	commit, err := pCommit.Add(pHatCommit)
-	if err != nil {
-		return nil, nil, nil
-	}
-
-	// commit = v
-
-	s := p.Shares(conf.n)
-	r := phi.Shares(conf.n)
-
-	return commit, s, r
-}
-
-func PedPolyVerify(commitment *share.PubPoly, idx int64, si, ri *share.PriShare, conf Config) bool {
-	_, coefficients := commitment.Info()
-
-	// Compute PI_0^t v^i^j
-	idxS := conf.g.Scalar().SetInt64(idx)
-	pi := conf.g.Point().Null()
-	factor := conf.g.Scalar().One()
-	for i := 0; i < len(coefficients); i++ {
-		c := coefficients[i]
-		m := c.Mul(factor, c)
-		pi = pi.Add(pi, m)
-
-		factor = factor.Mul(factor, idxS)
-	}
-
-	g0si := conf.g0.Mul(si.V, conf.g0)
-	g1ri := conf.g1.Mul(ri.V, conf.g1)
-	t := g0si.Add(g0si, g1ri)
-
-	return pi.Equal(t)
-}
-
 type Deal struct {
 	idx int64
 	si  *share.PriShare
@@ -148,23 +105,35 @@ func shareMessageToDeal(shareMsg *typedefs.Message_Share) (*Deal, error) {
 	}, nil
 }
 
-func decodePubShares(bs []byte, g kyber.Group) ([]*share.PubShare, error) {
+func encodeCommitment(commits []kyber.Point) ([]byte, error) {
+	encoded := make([]byte, 0)
+
+	for _, point := range commits {
+		bs, err := protobuf.Encode(point)
+		if err != nil {
+			return nil, err
+		}
+		encoded = append(encoded, bs...)
+	}
+	return encoded, nil
+}
+
+func decodeCommitment(bs []byte, g kyber.Group) ([]kyber.Point, error) {
 	pointSize := g.Point().MarshalSize()
-	shareSize := pointSize + Uint32Size
 
 	//
-	shares := make([]*share.PubShare, 0)
+	shares := make([]kyber.Point, 0)
 	start := 0
-	for start <= len(bs)-shareSize {
-		shareBytes := bs[start : start+shareSize]
-		s := &share.PubShare{}
+	for start <= len(bs)-pointSize {
+		shareBytes := bs[start : start+pointSize]
+		s := g.Point()
 		err := protobuf.Decode(shareBytes, s)
 		if err != nil {
 			return nil, err
 		}
 		shares = append(shares, s)
 
-		start = start + shareSize
+		start = start + pointSize
 	}
 
 	return shares, nil
@@ -172,7 +141,7 @@ func decodePubShares(bs []byte, g kyber.Group) ([]*share.PubShare, error) {
 
 func (a *AVSS) predicate(bs []byte) bool {
 
-	shares, err := decodePubShares(bs, a.conf.g)
+	commitment, err := decodeCommitment(bs, a.conf.g)
 	if err != nil {
 		return false
 	}
@@ -180,12 +149,7 @@ func (a *AVSS) predicate(bs []byte) bool {
 	// Wait for the share to be received
 	s := <-a.shareChannel
 
-	p, err := share.RecoverPubPoly(a.conf.g, shares, a.conf.t, a.conf.n)
-	if err != nil {
-		return false
-	}
-
-	ok := PedPolyVerify(p, s.idx, s.si, s.ri, a.conf)
+	ok := pedersencommitment.PedPolyVerify(commitment, s.idx, s.si, s.ri, a.conf.g, a.conf.g0, a.conf.g1)
 
 	return ok
 }
@@ -213,7 +177,7 @@ func (a *AVSS) sendShares(sShares, rShares []*share.PriShare) error {
 func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 	// Randomly sample a polynomial s.t. the origin is at s
 	p := share.NewPriPoly(a.conf.g, a.conf.t, s, random.New())
-	commit, sShares, rShares := PedPolyCommit(p, a.conf.t, a.conf)
+	commit, sShares, rShares := pedersencommitment.PedPolyCommit(p, a.conf.t, a.conf.n, a.conf.g, a.conf.g0, a.conf.g1)
 
 	err := a.sendShares(sShares, rShares)
 	if err != nil {
@@ -223,7 +187,7 @@ func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 	rs := reedsolomon.NewBWCodes(a.conf.t, a.conf.n)
 	fourRoundRBC := fourrounds.NewFourRoundRBC(a.predicate, sha256.New(), a.conf.t, a.iface, rs, 2, a.nodeID)
 
-	commitBytes, err := protobuf.Encode(commit.Shares(a.conf.n))
+	commitBytes, err := encodeCommitment(commit)
 	if err != nil {
 		return err
 	}

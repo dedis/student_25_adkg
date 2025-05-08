@@ -155,10 +155,11 @@ func (a *AVSS) predicate(bs []byte) bool {
 
 func (a *AVSS) sendShares(sShares, rShares []*share.PriShare) error {
 	// Broadcast the shares for each
-	for i := 1; i <= a.conf.n; i++ {
+	for i := 0; i < a.conf.n; i++ {
 		d := &Deal{
-			si: sShares[i],
-			ri: rShares[i],
+			si:  sShares[i],
+			ri:  rShares[i],
+			idx: int64(sShares[i].I),
 		}
 		inst, err := dealToShareInstruction(d)
 		if err != nil {

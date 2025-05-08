@@ -18,7 +18,7 @@ type FakeNetwork struct {
 func NewFakeNetwork() *FakeNetwork {
 	return &FakeNetwork{
 		nodes:    make(map[int64]chan []byte),
-		in:       make(chan []byte, 500),
+		in:       make(chan []byte, 50000),
 		delayMap: make(map[int64]time.Duration),
 	}
 }
@@ -43,7 +43,7 @@ func (n *FakeNetwork) JoinWithBuffer(size int) *FakeInterface {
 }
 
 func (n *FakeNetwork) JoinNetwork() *FakeInterface {
-	return n.JoinWithBuffer(100)
+	return n.JoinWithBuffer(10000)
 }
 
 func (n *FakeNetwork) Send(msg []byte, from, to int64) error {

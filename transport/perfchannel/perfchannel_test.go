@@ -19,33 +19,37 @@ func TestScenario(t *testing.T) {
 	sock2, err := net.CreateSocket("B")
 	require.NoError(t, err)
 
-	sock1.Send("B", transport.Packet{
+	err = sock1.Send("B", transport.Packet{
 		Header: &transport.Header{},
 		Msg: &transport.Message{
 			Type: "msgA1",
 		},
 	}, 0)
+	require.NoError(t, err)
 
-	sock2.Send("A", transport.Packet{
+	err = sock2.Send("A", transport.Packet{
 		Header: &transport.Header{},
 		Msg: &transport.Message{
 			Type: "msgB1",
 		},
 	}, 0)
+	require.NoError(t, err)
 
-	sock1.Send("B", transport.Packet{
+	err = sock1.Send("B", transport.Packet{
 		Header: &transport.Header{},
 		Msg: &transport.Message{
 			Type: "msgA2",
 		},
 	}, 0)
+	require.NoError(t, err)
 
-	sock2.Send("A", transport.Packet{
+	err = sock2.Send("A", transport.Packet{
 		Header: &transport.Header{},
 		Msg: &transport.Message{
 			Type: "msgB2",
 		},
 	}, 0)
+	require.NoError(t, err)
 
 	pkt, err := sock2.Recv(time.Second)
 	require.NoError(t, err)

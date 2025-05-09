@@ -7,15 +7,15 @@ message Message{
   }
 
   message Echo{
-    bytes mix=1;
-    bytes h=2;
-    int64 i=3;
+    bytes encodingShare=1;
+    bytes messageHash=2;
+    int64 index=3;
   }
 
   message Ready{
-    bytes mi=1;
-    bytes h=2;
-    int64 i=3;
+    bytes encodingShare=1;
+    bytes messageHash=2;
+    int64 index=3;
   }
 
   oneof op{

@@ -183,7 +183,8 @@ func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (bool, e
 		f.log.Info().Msg("Received propose message")
 		err = f.receivePropose(op.ProposeInst)
 	case *typedefs.Message_EchoInst:
-		f.log.Info().Msgf("Received echo message with nodeID %d and msg: %x", op.EchoInst.I, op.EchoInst.Mi)
+		f.log.Info().Msgf("Received echo message with nodeID %d and msg: %x",
+			op.EchoInst.GetIndex(), op.EchoInst.GetEncodingShare())
 		err = f.receiveEcho(op.EchoInst)
 	case *typedefs.Message_ReadyInst:
 		f.log.Info().Msg("Received ready message")
@@ -229,19 +230,19 @@ func (f *FourRoundRBC) receiveEcho(msg *typedefs.Message_Echo) error {
 	defer f.Unlock()
 
 	// Ignore ECHO message that are not for our index
-	if msg.GetI() != f.nodeID {
+	if msg.GetIndex() != f.nodeID {
 		return nil
 	}
 
-	count, ok := f.echoCount[string(msg.GetH())]
+	count, ok := f.echoCount[string(msg.GetMessageHash())]
 	if !ok {
 		count = 0
 	}
 	count++
-	f.echoCount[string(msg.GetH())] = count
+	f.echoCount[string(msg.GetMessageHash())] = count
 
 	// If the hash has received enough READY messages, then the threshold only needs be t+1
-	readyCount, ok := f.readyCounts[string(msg.GetH())]
+	readyCount, ok := f.readyCounts[string(msg.GetMessageHash())]
 	if !ok {
 		readyCount = 0
 	}
@@ -253,13 +254,13 @@ func (f *FourRoundRBC) receiveEcho(msg *typedefs.Message_Echo) error {
 	}
 
 	// Send the ready message and set sentReady
-	inst := createReadyMessage(msg.GetMi(), msg.GetH(), msg.GetI())
+	inst := createReadyMessage(msg.GetEncodingShare(), msg.GetMessageHash(), msg.GetIndex())
 	err := f.broadcastInstruction(inst)
 	if err != nil {
 		return err
 	}
 	f.sentReady = true
-	f.log.Printf("Sent Ready message for %x", msg.GetMi())
+	f.log.Printf("Sent Ready message for %x", msg.GetEncodingShare())
 	return nil
 }
 
@@ -267,41 +268,41 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 	f.Lock()
 	defer f.Unlock()
 
-	count, ok := f.readyCounts[string(msg.GetH())]
+	count, ok := f.readyCounts[string(msg.GetMessageHash())]
 	if !ok {
 		count = 0
 	}
 	count++
-	f.readyCounts[string(msg.GetH())] = count
+	f.readyCounts[string(msg.GetMessageHash())] = count
 
-	echoes, ok := f.echoCount[string(msg.GetH())]
+	echoes, ok := f.echoCount[string(msg.GetMessageHash())]
 	sendReady := ok && !f.sentReady && f.checkReadyThreshold(count) && f.checkReadyThreshold(echoes)
 
 	if sendReady {
 		// Send the ready message and set sentReady
-		inst := createReadyMessage(msg.GetMi(), msg.GetH(), msg.GetI())
+		inst := createReadyMessage(msg.GetEncodingShare(), msg.GetMessageHash(), msg.GetIndex())
 		err := f.broadcastInstruction(inst)
 		if err != nil {
 			f.log.Err(err).Msg("Failed to broadcast ready message")
 			return false, err
 		}
 		f.sentReady = true
-		f.log.Printf("Sent Ready message for %x", msg.GetMi())
+		f.log.Printf("Sent Ready message for %x", msg.GetEncodingShare())
 	}
 
-	firstTime := f.addReadyEncodingShareIfFirstTimeSeen(string(msg.GetH()), string(msg.GetMi()))
+	firstTime := f.addReadyEncodingShareIfFirstTimeSeen(string(msg.GetMessageHash()), string(msg.GetEncodingShare()))
 
 	// If this value is seen for the first time, add it to T_h and try to reconstruct
 	if firstTime {
-		f.log.Printf("Received first ready message for %x", msg.GetMi())
+		f.log.Printf("Received first ready message for %x", msg.GetEncodingShare())
 		f.th = append(f.th, reedsolomon.Encoding{
-			Val: msg.GetMi(),
-			Idx: msg.GetI(),
+			Val: msg.GetEncodingShare(),
+			Idx: msg.GetIndex(),
 		})
 		f.log.Printf("Got %d messges in th", len(f.th))
 		// Try to reconstruct
 
-		value, finished, err := f.reconstruct(msg.GetH())
+		value, finished, err := f.reconstruct(msg.GetMessageHash())
 		if err != nil {
 			f.log.Printf("Failed to reconstruct: %v", err)
 		}
@@ -369,9 +370,9 @@ func (f *FourRoundRBC) broadcastInstruction(instruction *typedefs.Instruction) e
 
 func createReadyMessage(mi, h []byte, i int64) *typedefs.Instruction {
 	readyMsg := &typedefs.Message_Ready{
-		Mi: mi,
-		H:  h,
-		I:  i,
+		EncodingShare: mi,
+		MessageHash:   h,
+		Index:         i,
 	}
 	msg := &typedefs.Message{Op: &typedefs.Message_ReadyInst{ReadyInst: readyMsg}}
 	inst := &typedefs.Instruction{Operation: msg}
@@ -380,9 +381,9 @@ func createReadyMessage(mi, h []byte, i int64) *typedefs.Instruction {
 
 func createEchoMessage(mi, h []byte, i int64) *typedefs.Instruction {
 	echoMsg := &typedefs.Message_Echo{
-		Mi: mi,
-		H:  h,
-		I:  i,
+		EncodingShare: mi,
+		MessageHash:   h,
+		Index:         i,
 	}
 	msg := &typedefs.Message{Op: &typedefs.Message_EchoInst{EchoInst: echoMsg}}
 	inst := &typedefs.Instruction{Operation: msg}

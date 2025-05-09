@@ -171,8 +171,8 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 			require.NoError(t, err)
 			switch op := msg.Operation.Op.(type) {
 			case *typedefs.Message_EchoInst:
-				require.Equal(t, int64(j), op.EchoInst.I)
-				require.True(t, bytes.Equal(op.EchoInst.H, sHash))
+				require.Equal(t, int64(j), op.EchoInst.GetIndex())
+				require.True(t, bytes.Equal(op.EchoInst.GetMessageHash(), sHash))
 			default:
 				require.Fail(t, "Unexpected message type: %T", msg)
 			}
@@ -199,9 +199,9 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 		require.NoError(t, err)
 		switch op := msg.GetOperation().GetOp().(type) {
 		case *typedefs.Message_EchoInst:
-			chunks[op.EchoInst.I] = reedsolomon.Encoding{
-				Idx: op.EchoInst.I,
-				Val: op.EchoInst.Mi,
+			chunks[op.EchoInst.GetIndex()] = reedsolomon.Encoding{
+				Idx: op.EchoInst.GetIndex(),
+				Val: op.EchoInst.GetEncodingShare(),
 			}
 		default:
 			require.Fail(t, "Unexpected message type: %T", msg)

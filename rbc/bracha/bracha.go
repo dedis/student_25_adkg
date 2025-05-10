@@ -3,37 +3,12 @@ package bracha
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
-	"strconv"
+	"student_25_adkg/logging"
 	"student_25_adkg/rbc"
 	"sync"
-	"time"
 
 	"github.com/rs/zerolog"
 	"go.dedis.ch/protobuf"
-)
-
-// Define the logger
-var (
-	logout = zerolog.ConsoleWriter{
-		Out:        os.Stdout,
-		TimeFormat: time.RFC3339,
-		// Format the node ID
-		FormatPrepare: func(e map[string]interface{}) error {
-			e["nodeID"] = fmt.Sprintf("[%s]", e["nodeID"])
-			return nil
-		},
-		// Change the order in which things appear
-		PartsOrder: []string{
-			zerolog.TimestampFieldName,
-			zerolog.LevelFieldName,
-			"nodeID",
-			zerolog.MessageFieldName,
-		},
-		// Prevent the nodeID from being printed again
-		FieldsExclude: []string{"nodeID"},
-	}
 )
 
 // RBC implements Bracha RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
@@ -54,21 +29,6 @@ type RBC struct {
 
 // NewBrachaRBC creates a new BrachaRBC structure
 func NewBrachaRBC(predicate func(bool) bool, threshold int, iface rbc.AuthenticatedMessageStream, nodeID int64) *RBC {
-	// Disable logging based on the GLOG environment variable
-	var logLevel zerolog.Level
-	if os.Getenv("GLOG") == "no" {
-		logLevel = zerolog.Disabled
-	} else {
-		logLevel = zerolog.InfoLevel
-	}
-
-	logger := zerolog.New(logout).
-		Level(logLevel).
-		With().
-		Timestamp().
-		Str("nodeID", strconv.Itoa(int(nodeID))).
-		Logger()
-
 	return &RBC{
 		predicate:  predicate,
 		iface:      iface,
@@ -79,7 +39,7 @@ func NewBrachaRBC(predicate func(bool) bool, threshold int, iface rbc.Authentica
 		sentReady:  false,
 		finished:   false,
 		RWMutex:    sync.RWMutex{},
-		logger:     logger,
+		logger:     logging.GetLogger(nodeID),
 		nodeID:     nodeID,
 	}
 }

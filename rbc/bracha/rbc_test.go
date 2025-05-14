@@ -82,13 +82,14 @@ func runRBCWithValue(t require.TestingT, nodes []*TestNode, dealersIdx []int, va
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				instance, ok := nodes[i].rbc.GetInstance(instanceID)
-				require.True(t, ok)
+				instance, err := nodes[i].rbc.GetInstance(instanceID)
+				require.NoError(t, err)
 				require.NotNil(t, instance)
+				brachaInstance := instance.(*Instance)
 
-				<-instance.getFinishedChan()
+				<-brachaInstance.getFinishedChan()
 
-				checkInstance(t, instance, expectedValue)
+				checkInstance(t, brachaInstance, expectedValue)
 			}()
 		}
 

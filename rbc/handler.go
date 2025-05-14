@@ -26,9 +26,9 @@ func (h *Handler[T]) RegisterIfAbsent(instance Instance[T]) bool {
 	return !ok
 }
 
-// Get returns the instance linked to the given instance or ErrNoInstance if
+// GetInstance returns the instance linked to the given instance or ErrNoInstance if
 // there is no such instance
-func (h *Handler[T]) Get(identifier InstanceIdentifier) (Instance[T], error) {
+func (h *Handler[T]) GetInstance(identifier InstanceIdentifier) (Instance[T], error) {
 	instance, ok := h.instances[identifier]
 	if !ok {
 		return instance, ErrNoInstance

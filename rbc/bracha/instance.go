@@ -8,7 +8,7 @@ import (
 // Instance represents an instance of an RBC protocol
 type Instance struct {
 	*State
-	*Config
+	*rbc.Config
 	predicate func(bool) bool
 	id        rbc.InstanceIdentifier
 	result    bool
@@ -17,7 +17,7 @@ type Instance struct {
 	sync.RWMutex
 }
 
-func NewInstance(id rbc.InstanceIdentifier, predicate func(bool) bool, config *Config) *Instance {
+func NewInstance(id rbc.InstanceIdentifier, predicate func(bool) bool, config *rbc.Config) *Instance {
 	return &Instance{
 		id:        id,
 		predicate: predicate,
@@ -125,16 +125,16 @@ func (i *Instance) receiveReady(value bool) (ready bool) {
 }
 
 func (i *Instance) checkEchoThreshold() bool {
-	return i.echoCount.Value() >= 2*i.threshold
+	return i.echoCount.Value() >= 2*i.Threshold
 }
 
 // checkReadyThreshold checks if the number of READY messages has
 // reached the required threshold
 func (i *Instance) checkReadyThreshold() bool {
-	return i.GetReadyCount() > i.threshold
+	return i.GetReadyCount() > i.Threshold
 }
 
 // checkFinished checks if enough ready messages have been received to finish the protocol
 func (i *Instance) checkFinished() bool {
-	return i.GetReadyCount() > 2*i.threshold
+	return i.GetReadyCount() > 2*i.Threshold
 }

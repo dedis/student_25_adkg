@@ -25,6 +25,10 @@ type AuthenticatedMessageStream interface {
 	AuthenticatedMessageReceiver
 }
 
+type Config struct {
+	Threshold int
+}
+
 type Message interface {
 	GetIdentifier() InstanceIdentifier
 }

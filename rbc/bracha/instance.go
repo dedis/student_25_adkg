@@ -13,7 +13,7 @@ type Instance struct {
 	id        rbc.InstanceIdentifier
 	result    bool
 	finished  bool
-	finishedC chan bool
+	finishedC chan struct{}
 	sync.RWMutex
 }
 
@@ -22,7 +22,7 @@ func NewInstance(id rbc.InstanceIdentifier, predicate func(bool) bool, config *r
 		id:        id,
 		predicate: predicate,
 		finished:  false,
-		finishedC: make(chan bool),
+		finishedC: make(chan struct{}),
 		result:    false,
 		RWMutex:   sync.RWMutex{},
 		State:     NewState(),
@@ -49,7 +49,7 @@ func (i *Instance) IsFinished() bool {
 	return i.finished
 }
 
-func (i *Instance) getFinishedChan() <-chan bool {
+func (i *Instance) getFinishedChan() <-chan struct{} {
 	return i.finishedC
 }
 

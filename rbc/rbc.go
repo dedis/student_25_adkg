@@ -49,15 +49,5 @@ type Receiver[T any] interface {
 	Receive(context.Context) (Instance[T], error)
 }
 
-// Node can broadcast message and listen to the underlying network for a broadcast
-type Node[T any] interface {
-	Broadcaster[T]
-	Receiver[T]
-	// GetIndex returns the index of this node
-	GetIndex() int64
-	// Start sets the node to listen for the network. This should be called before any broadcast
-	Start(ctx context.Context) error
-}
-
 var ErrPredicateRejected = errors.New("predicate rejected")
 var ErrInstanceNotFinished = errors.New("instance is not finished and thus no result has been produced")

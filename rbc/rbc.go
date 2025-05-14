@@ -29,9 +29,16 @@ type InstanceIdentifier int64
 
 // Instance represents the process of a single message broadcast
 // T is the type of message being broadcast
-type Instance[T any] interface {
+type Instance[T any, M interface{}] interface {
+	// HandleMessage handles a given message and returns some other message to be
+	// sent as a result or nil if nothing needs to be sent.
+	HandleMessage(*M) *M
+	// GetIdentifier returns a value identifying this instance
 	GetIdentifier() InstanceIdentifier
+	// IsFinished returns true if this instance has terminated
 	IsFinished() bool
+	// GetResult returns the result of this instance or ErrInstanceNotFinished if
+	// it is not yet finished
 	GetResult() (T, error)
 }
 
@@ -43,10 +50,10 @@ type Broadcaster[T any] interface {
 }
 
 // Receiver allows to wait for an Instance of type T
-type Receiver[T any] interface {
+type Receiver[T any, M interface{}] interface {
 	// Receive blocks until an Instance is started and returns the instance or an error.
 	// If an error occurs with th given instance, it will be returned as is.
-	Receive(context.Context) (Instance[T], error)
+	Receive(context.Context) (Instance[T, M], error)
 }
 
 var ErrPredicateRejected = errors.New("predicate rejected")

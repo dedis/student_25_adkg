@@ -1,14 +1,18 @@
 package bracha
 
+import "student_25_adkg/rbc"
+
 type Message struct {
-	MsgType MessageType
-	Content bool
+	InstanceID rbc.InstanceIdentifier
+	MsgType    MessageType
+	Content    bool
 }
 
-func NewBrachaMessage(msgType MessageType, content bool) *Message {
+func NewBrachaMessage(identifier rbc.InstanceIdentifier, msgType MessageType, content bool) *Message {
 	return &Message{
-		MsgType: msgType,
-		Content: content,
+		MsgType:    msgType,
+		Content:    content,
+		InstanceID: identifier,
 	}
 }
 

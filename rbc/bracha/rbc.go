@@ -36,19 +36,71 @@ var (
 	}
 )
 
+type Config struct {
+	threshold int
+}
+
+type Instance struct {
+	*State
+	*Config
+	predicate func(bool) bool
+	id        rbc.InstanceIdentifier
+	result    bool
+	finished  bool
+	finishedC chan bool
+	sync.RWMutex
+}
+
+func NewInstance(id rbc.InstanceIdentifier, predicate func(bool) bool, config *Config) *Instance {
+	return &Instance{
+		id:        id,
+		predicate: predicate,
+		finished:  false,
+		finishedC: make(chan bool),
+		result:    false,
+		RWMutex:   sync.RWMutex{},
+		State:     NewState(),
+		Config:    config,
+	}
+}
+
+func (i *Instance) GetIdentifier() rbc.InstanceIdentifier {
+	return i.id
+}
+
+func (i *Instance) GetResult() (bool, error) {
+	i.RLock()
+	defer i.RUnlock()
+	if !i.finished {
+		return i.result, rbc.ErrInstanceNotFinished
+	}
+	return i.result, nil
+}
+
+func (i *Instance) IsFinished() bool {
+	i.RLock()
+	defer i.RUnlock()
+	return i.finished
+}
+
+func (i *Instance) getFinishedChan() <-chan bool {
+	return i.finishedC
+}
+
+func (i *Instance) setFinished(result bool) {
+	i.finished = true
+	i.result = result
+	close(i.finishedC)
+}
+
 // RBC implements Bracha RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
 type RBC struct {
-	iface      rbc.AuthenticatedMessageStream
-	predicate  func(bool) bool
-	stopChan   chan struct{}
-	echoCount  int
-	readyCount int
-	threshold  int
-	sentReady  bool
-	finished   bool
-	value      bool
-	nodeID     int64
-	logger     zerolog.Logger
+	config    *Config
+	iface     rbc.AuthenticatedMessageStream
+	predicate func(bool) bool
+	instances map[rbc.InstanceIdentifier]*Instance
+	nodeID    int64
+	logger    zerolog.Logger
 	sync.RWMutex
 }
 
@@ -70,17 +122,13 @@ func NewBrachaRBC(predicate func(bool) bool, threshold int, iface rbc.Authentica
 		Logger()
 
 	return &RBC{
-		predicate:  predicate,
-		iface:      iface,
-		stopChan:   make(chan struct{}),
-		echoCount:  0,
-		readyCount: 0,
-		threshold:  threshold,
-		sentReady:  false,
-		finished:   false,
-		RWMutex:    sync.RWMutex{},
-		logger:     logger,
-		nodeID:     nodeID,
+		predicate: predicate,
+		config:    &Config{threshold: threshold},
+		iface:     iface,
+		instances: make(map[rbc.InstanceIdentifier]*Instance),
+		RWMutex:   sync.RWMutex{},
+		logger:    logger,
+		nodeID:    nodeID,
 	}
 }
 
@@ -93,152 +141,165 @@ func (b *RBC) sendMsg(msg *Message) error {
 	return err
 }
 
-// start listens for packets on the interface and handles them. Returns a channel that will
-// return nil when the protocol finishes or an error if it stopped or any other reason
-func (b *RBC) start(ctx context.Context) chan error {
-	finishedChan := make(chan error)
-	go func() {
-		for {
-			bs, err := b.iface.Receive(ctx)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					b.logger.Warn().Err(err).Msg("context canceled")
-					finishedChan <- err
-					return
-				}
-				b.logger.Error().Err(err).Msg("error receiving message")
+// Start listens for packets on the interface and handles them. Blocks until the given context is canceled
+func (b *RBC) Start(ctx context.Context) error {
+	var returnErr error
+	for returnErr == nil {
+		bs, err := b.iface.Receive(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				b.logger.Warn().Err(err).Msg("context canceled")
+				returnErr = err
 				continue
 			}
-			msg := &Message{}
-			err = protobuf.Decode(bs, msg)
-			if err != nil {
-				b.logger.Error().Err(err).Msg("error decoding message")
-				continue
-			}
-			finished, err := b.handleMsg(*msg)
-			if err != nil {
-				b.logger.Err(err).Msg("Error handling message")
-				continue
-			}
-			if finished {
-				b.finished = true
-				b.value = msg.Content
-				finishedChan <- nil
-				b.logger.Info().Msg("Protocol finished")
-				return
-			}
+			b.logger.Error().Err(err).Msg("error receiving message")
+			continue
 		}
-	}()
-	return finishedChan
+		msg := &Message{}
+		err = protobuf.Decode(bs, msg)
+		if err != nil {
+			b.logger.Error().Err(err).Msg("error decoding message")
+			continue
+		}
+		err = b.handleMsg(*msg)
+		if err != nil {
+			b.logger.Err(err).Msg("error handling message")
+			continue
+		}
+	}
+	return returnErr
 }
+
+var ErrAlreadyRunningBroadcast = errors.New("can't start a broadcast from this node because a broadcast is already running")
 
 // RBroadcast implements the method from the RBC interface
-func (b *RBC) RBroadcast(ctx context.Context, content bool) error {
-	finishedChan := b.start(ctx)
+func (b *RBC) RBroadcast(content bool) (rbc.InstanceIdentifier, error) {
+	instanceID := rbc.InstanceIdentifier(b.nodeID)
+	// Start the instance by sending a PROPOSE message
+	err := b.sendProposeMessage(instanceID, content)
 
-	err := b.startBroadcast(content)
-	if err != nil {
-		return err
-	}
-
-	// Wait for the protocol to finish
-	err = <-finishedChan
-	close(finishedChan)
-	return err
+	return instanceID, err
 }
 
-func (b *RBC) Listen(ctx context.Context) error {
-	finishedChan := b.start(ctx)
+func (b *RBC) GetInstance(id rbc.InstanceIdentifier) (*Instance, bool) {
+	b.RLock()
+	defer b.RUnlock()
+	instance, ok := b.instances[id]
+	return instance, ok
 
-	// Wait for the protocol to finish
-	err := <-finishedChan
-	close(finishedChan)
-	return err
 }
 
-func (b *RBC) startBroadcast(val bool) error {
-	msg := NewBrachaMessage(PROPOSE, val)
+// sendProposeMessage creates a PROPOSE message using the given value and the instance identifier and
+// broadcasts it using the underlying network
+func (b *RBC) sendProposeMessage(instanceID rbc.InstanceIdentifier, val bool) error {
+	msg := NewBrachaMessage(instanceID, PROPOSE, val)
 	err := b.sendMsg(msg)
 	return err
 }
 
-// HandleMsg implements the method from the RBC interface
-func (b *RBC) handleMsg(message Message) (bool, error) {
+// createInstance creates a new RBC instance using the given identifier and registers it.
+// returns ErrAlreadyRunningBroadcast if a broadcast with the given identifier is already running
+func (b *RBC) createInstance(identifier rbc.InstanceIdentifier) (*Instance, error) {
+	b.Lock()
+	defer b.Unlock()
+	if _, ok := b.instances[identifier]; ok {
+		return nil, ErrAlreadyRunningBroadcast
+	}
+
+	// Create a new instance using the given identifierS
+	instance := NewInstance(identifier, func(_ bool) bool { return true }, b.config) // TODO predicate from somewhere
+	b.instances[identifier] = instance
+
+	return instance, nil
+}
+
+// handleMsg handles a message received on the network
+func (b *RBC) handleMsg(message Message) error {
+	var err error
+	instance := b.instances[message.InstanceID]
 	send := false
-	t := PROPOSE
-	finished := false
+	messageType := PROPOSE
 	switch message.MsgType {
 	case PROPOSE:
-		send = b.receivePropose(message.Content)
-		t = ECHO
+		// Create instance
+		instance, err = b.createInstance(message.InstanceID)
+		if err != nil {
+			break
+		}
+
+		send = instance.receivePropose(message.Content)
+		messageType = ECHO
 	case ECHO:
-		send = b.receiveEcho(message.Content)
-		t = READY
+		send = instance.receiveEcho(message.Content)
+		messageType = READY
 	case READY:
-		finished, send = b.receiveReady(message.Content)
-		t = READY
+		send = instance.receiveReady(message.Content)
+		messageType = READY
 	default:
 		send = false
 	}
 
-	if send { // If there is something to send
-		toSend := NewBrachaMessage(t, message.Content)
-		err := b.sendMsg(toSend)
-		if err != nil {
-			return finished, err
-		}
-		if t == READY {
-			b.sentReady = true
-		}
+	if err != nil || !send {
+		return err
 	}
-	return finished, nil
+
+	toSend := NewBrachaMessage(message.InstanceID, messageType, message.Content)
+	err = b.sendMsg(toSend)
+	if err != nil {
+		return err
+	}
+	if messageType == READY {
+		instance.SetSentReady(true)
+	}
+	return nil
 }
 
 // receivePropose handles the logic necessary when a PROPOSE message is received
-func (b *RBC) receivePropose(s bool) (echo bool) {
-	return b.predicate(s)
+func (i *Instance) receivePropose(s bool) (echo bool) {
+	return i.predicate(s)
 }
 
 // receiveEcho handles the logic necessary when a ECHO message is received
-func (b *RBC) receiveEcho(s bool) (ready bool) {
-	b.Lock()
-	defer b.Unlock()
-	if !b.predicate(s) || b.finished {
-		return b.echoCount >= 2*b.threshold+1
+func (i *Instance) receiveEcho(s bool) (ready bool) {
+	i.Lock()
+	defer i.Unlock()
+	if !i.predicate(s) || i.finished {
+		return i.checkEchoThreshold()
 	}
-	b.echoCount++
-	ready = checkEchoThreshold(b.echoCount, b.threshold) && !b.sentReady
+	i.echoCount.Inc()
+	ready = i.checkEchoThreshold() && !i.readySent
 	return ready
 }
 
 // ReceiveReady handles the reception of a READY message. If enough ready messages have been received, the protocol
 // returns finished=true and the value field is set. The ready bool specifies if a ready message should be sent
-func (b *RBC) receiveReady(s bool) (finished bool, ready bool) {
-	b.RLock()
-	defer b.RUnlock()
-	if !b.predicate(s) || b.finished {
-		return false, false
+func (i *Instance) receiveReady(value bool) (ready bool) {
+	i.RLock()
+	defer i.RUnlock()
+	if !i.predicate(value) || i.finished {
+		return false
 	}
-	b.readyCount++
-	ready = checkReadyThreshold(b.readyCount, b.threshold) && !b.sentReady
+	i.readyCount.Inc()
+	ready = i.checkReadyThreshold() && !i.readySent
 
-	finished = b.readyCount > 2*b.threshold
-	if finished {
-		b.finished = true
-		b.value = s
+	if i.checkFinished() {
+		i.setFinished(value)
 	}
 
-	return finished, ready
+	return ready
+}
+
+func (i *Instance) checkEchoThreshold() bool {
+	return i.echoCount.Value() >= 2*i.threshold
 }
 
 // checkReadyThreshold checks if the number of READY messages has
 // reached the required threshold
-func checkReadyThreshold(readyCount, threshold int) bool {
-	return readyCount > threshold
+func (i *Instance) checkReadyThreshold() bool {
+	return i.GetReadyCount() > i.threshold
 }
 
-// checkEchoThreshold checks if the number of ECHO messages has
-// reached the required threshold
-func checkEchoThreshold(echoCount, threshold int) bool {
-	return echoCount > 2*threshold
+// checkFinished checks if enough ready messages have been received to finish the protocol
+func (i *Instance) checkFinished() bool {
+	return i.GetReadyCount() > 2*i.threshold
 }

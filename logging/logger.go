@@ -31,7 +31,7 @@ var (
 )
 
 // GetLogger returns a formatted logger using the given logger id
-func GetLogger(id int) zerolog.Logger {
+func GetLogger(id int64) zerolog.Logger {
 	// Disable logging based on the GLOG environment variable
 	var logLevel zerolog.Level
 	if os.Getenv("GLOG") == "no" {
@@ -44,6 +44,6 @@ func GetLogger(id int) zerolog.Logger {
 		Level(logLevel).
 		With().
 		Timestamp().
-		Str("nodeID", strconv.Itoa(id)).
+		Str("nodeID", strconv.FormatInt(id, 10)).
 		Logger()
 }

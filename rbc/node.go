@@ -3,6 +3,7 @@ package rbc
 import (
 	"context"
 	"errors"
+	"student_25_adkg/logging"
 
 	"github.com/rs/zerolog"
 	"go.dedis.ch/protobuf"
@@ -17,17 +18,17 @@ type Node[T interface{}] struct {
 	logger zerolog.Logger
 }
 
-func NewNode[T any](index NodeIndex, receiver AuthenticatedMessageReceiver) *Node[T] {
+func NewNode[T interface{}](index NodeIndex, receiver AuthenticatedMessageReceiver) *Node[T] {
 	return &Node[T]{
 		NodeIndex:                    index,
 		AuthenticatedMessageReceiver: receiver,
-		logger:                       zerolog.Logger{},
+		logger:                       logging.GetLogger(int64(index)),
 	}
 }
 
 // Start sets the node to listen for the network. When a message is received,
 // the given handleMsg function is called
-func (n Node[T]) Start(ctx context.Context, handleMsg func(T) error) error {
+func (n Node[T]) Start(ctx context.Context, handleMsg func(*T) error) error {
 	var returnErr error
 	for returnErr == nil {
 		bs, err := n.Receive(ctx)
@@ -41,12 +42,12 @@ func (n Node[T]) Start(ctx context.Context, handleMsg func(T) error) error {
 			continue
 		}
 		var msg T
-		err = protobuf.Decode(bs, msg)
+		err = protobuf.Decode(bs, &msg)
 		if err != nil {
 			n.logger.Error().Err(err).Msg("error decoding message")
 			continue
 		}
-		err = handleMsg(msg)
+		err = handleMsg(&msg)
 		if err != nil {
 			n.logger.Err(err).Msg("error handling message")
 			continue
@@ -57,5 +58,5 @@ func (n Node[T]) Start(ctx context.Context, handleMsg func(T) error) error {
 
 // GetIndex returns the index of this node
 func (n Node[T]) GetIndex() NodeIndex {
-	return n.GetIndex()
+	return n.NodeIndex
 }

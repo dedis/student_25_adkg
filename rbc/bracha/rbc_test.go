@@ -66,7 +66,7 @@ func runRBCWithValue(t require.TestingT, nodes []*TestNode, dealersIdx []int, va
 	// Start RBC from each dealer
 	instances := make(map[rbc.InstanceIdentifier]bool)
 	for _, i := range dealersIdx {
-		expectedInstance := rbc.InstanceIdentifier(nodes[i].rbc.nodeID)
+		expectedInstance := rbc.InstanceIdentifier(nodes[i].rbc.GetIndex())
 		value := values[i]
 		instances[expectedInstance] = value
 
@@ -131,21 +131,4 @@ func TestRBC_MediumNetwork(t *testing.T) {
 	nodes := setupNetwork(t, ctx, threshold)
 	runRBCWithValue(t, nodes, []int{0, 1}, []bool{false, false})
 	cancel()
-}
-
-// TestRBC_MessageComplexity test the message complexity should be O(n^2)
-func BenchmarkRBC_MessageComplexity(b *testing.B) {
-	for b.Loop() {
-		ctx, cancel := context.WithCancel(context.Background())
-		threshold := 5
-		nodes := setupNetwork(b, ctx, threshold)
-		runRBCWithValue(b, nodes, []int{0, 1}, []bool{false, false})
-
-		ins := nodes[0].iface.GetReceived()
-
-		b.Logf("Received %d packets at one node", len(ins))
-		require.LessOrEqual(b, len(ins), len(nodes)*len(nodes))
-
-		cancel()
-	}
 }

@@ -95,12 +95,12 @@ func (i *Instance) setFinished(result bool) {
 
 // RBC implements Bracha RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
 type RBC struct {
-	config    *Config
-	iface     rbc.AuthenticatedMessageStream
-	predicate func(bool) bool
-	instances map[rbc.InstanceIdentifier]*Instance
-	nodeID    int64
-	logger    zerolog.Logger
+	*rbc.Node[Message]
+	config      *Config
+	broadcaster rbc.AuthenticatedMessageBroadcaster
+	predicate   func(bool) bool
+	instances   map[rbc.InstanceIdentifier]*Instance
+	logger      zerolog.Logger
 	sync.RWMutex
 }
 
@@ -122,13 +122,13 @@ func NewBrachaRBC(predicate func(bool) bool, threshold int, iface rbc.Authentica
 		Logger()
 
 	return &RBC{
-		predicate: predicate,
-		config:    &Config{threshold: threshold},
-		iface:     iface,
-		instances: make(map[rbc.InstanceIdentifier]*Instance),
-		RWMutex:   sync.RWMutex{},
-		logger:    logger,
-		nodeID:    nodeID,
+		Node:        rbc.NewNode[Message](rbc.NodeIndex(nodeID), iface),
+		predicate:   predicate,
+		config:      &Config{threshold: threshold},
+		broadcaster: iface,
+		instances:   make(map[rbc.InstanceIdentifier]*Instance),
+		RWMutex:     sync.RWMutex{},
+		logger:      logger,
 	}
 }
 
@@ -137,44 +137,20 @@ func (b *RBC) sendMsg(msg *Message) error {
 	if err != nil {
 		return err
 	}
-	err = b.iface.Broadcast(marshalled)
+	err = b.broadcaster.Broadcast(marshalled)
 	return err
 }
 
 // Start listens for packets on the interface and handles them. Blocks until the given context is canceled
 func (b *RBC) Start(ctx context.Context) error {
-	var returnErr error
-	for returnErr == nil {
-		bs, err := b.iface.Receive(ctx)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				b.logger.Warn().Err(err).Msg("context canceled")
-				returnErr = err
-				continue
-			}
-			b.logger.Error().Err(err).Msg("error receiving message")
-			continue
-		}
-		msg := &Message{}
-		err = protobuf.Decode(bs, msg)
-		if err != nil {
-			b.logger.Error().Err(err).Msg("error decoding message")
-			continue
-		}
-		err = b.handleMsg(*msg)
-		if err != nil {
-			b.logger.Err(err).Msg("error handling message")
-			continue
-		}
-	}
-	return returnErr
+	return b.Node.Start(ctx, b.handleMsg)
 }
 
 var ErrAlreadyRunningBroadcast = errors.New("can't start a broadcast from this node because a broadcast is already running")
 
 // RBroadcast implements the method from the RBC interface
 func (b *RBC) RBroadcast(content bool) (rbc.InstanceIdentifier, error) {
-	instanceID := rbc.InstanceIdentifier(b.nodeID)
+	instanceID := rbc.InstanceIdentifier(b.GetIndex())
 	// Start the instance by sending a PROPOSE message
 	err := b.sendProposeMessage(instanceID, content)
 
@@ -214,7 +190,7 @@ func (b *RBC) createInstance(identifier rbc.InstanceIdentifier) (*Instance, erro
 }
 
 // handleMsg handles a message received on the network
-func (b *RBC) handleMsg(message Message) error {
+func (b *RBC) handleMsg(message *Message) error {
 	var err error
 	instance := b.instances[message.InstanceID]
 	send := false

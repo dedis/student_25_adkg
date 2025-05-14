@@ -43,7 +43,7 @@ type Config struct {
 // RBC implements Bracha RBC according to https://eprint.iacr.org/2021/777.pdf, algorithm 1.
 type RBC struct {
 	*rbc.Node[Message]
-	handler     *rbc.Handler[bool, Message]
+	handler     *rbc.Handler[bool]
 	config      *Config
 	broadcaster rbc.AuthenticatedMessageBroadcaster
 	predicate   func(bool) bool
@@ -129,13 +129,14 @@ func (b *RBC) createInstance(identifier rbc.InstanceIdentifier) *Instance {
 func (b *RBC) handleMsg(message *Message) error {
 	instanceIdentifier := message.InstanceID
 	_ = b.handler.RegisterIfAbsent(b.createInstance(instanceIdentifier))
-	toSend, err := b.handler.HandleMessage(instanceIdentifier, message)
+	toSend, err := b.handler.HandleMessage(message)
 
 	if err != nil || toSend == nil {
 		return err
 	}
 
-	err = b.sendMsg(toSend)
+	brachaMessage := toSend.(*Message)
+	err = b.sendMsg(brachaMessage)
 	if err != nil {
 		return err
 	}

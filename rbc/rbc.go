@@ -25,14 +25,18 @@ type AuthenticatedMessageStream interface {
 	AuthenticatedMessageReceiver
 }
 
+type Message interface {
+	GetIdentifier() InstanceIdentifier
+}
+
 type InstanceIdentifier int64
 
 // Instance represents the process of a single message broadcast
 // T is the type of message being broadcast
-type Instance[T any, M interface{}] interface {
+type Instance[T any] interface {
 	// HandleMessage handles a given message and returns some other message to be
 	// sent as a result or nil if nothing needs to be sent.
-	HandleMessage(*M) *M
+	HandleMessage(Message) Message
 	// GetIdentifier returns a value identifying this instance
 	GetIdentifier() InstanceIdentifier
 	// IsFinished returns true if this instance has terminated
@@ -53,7 +57,7 @@ type Broadcaster[T any] interface {
 type Receiver[T any, M interface{}] interface {
 	// Receive blocks until an Instance is started and returns the instance or an error.
 	// If an error occurs with th given instance, it will be returned as is.
-	Receive(context.Context) (Instance[T, M], error)
+	Receive(context.Context) (Instance[T], error)
 }
 
 var ErrPredicateRejected = errors.New("predicate rejected")

@@ -16,6 +16,10 @@ func NewBrachaMessage(identifier rbc.InstanceIdentifier, msgType MessageType, co
 	}
 }
 
+func (m *Message) GetIdentifier() rbc.InstanceIdentifier {
+	return m.InstanceID
+}
+
 type MessageType uint32
 
 const (

@@ -60,18 +60,19 @@ func (i *Instance) setFinished(result bool) {
 }
 
 // HandleMessage handles a message received on the network
-func (i *Instance) HandleMessage(message *Message) *Message {
+func (i *Instance) HandleMessage(message rbc.Message) rbc.Message {
+	brachaMessage := message.(*Message)
 	send := false
 	messageType := PROPOSE
-	switch message.MsgType {
+	switch brachaMessage.MsgType {
 	case PROPOSE:
-		send = i.receivePropose(message.Content)
+		send = i.receivePropose(brachaMessage.Content)
 		messageType = ECHO
 	case ECHO:
-		send = i.receiveEcho(message.Content)
+		send = i.receiveEcho(brachaMessage.Content)
 		messageType = READY
 	case READY:
-		send = i.receiveReady(message.Content)
+		send = i.receiveReady(brachaMessage.Content)
 		messageType = READY
 	default:
 		send = false
@@ -81,7 +82,7 @@ func (i *Instance) HandleMessage(message *Message) *Message {
 		return nil
 	}
 
-	toSend := NewBrachaMessage(message.InstanceID, messageType, message.Content)
+	toSend := NewBrachaMessage(brachaMessage.InstanceID, messageType, brachaMessage.Content)
 	if toSend != nil && messageType == READY {
 		i.State.SetSentReady(true)
 	}

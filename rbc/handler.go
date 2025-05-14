@@ -4,21 +4,21 @@ import "errors"
 
 var ErrNoInstance = errors.New("no instance found")
 
-// Handler handles multiple instances of RBC
-type Handler[T any, M interface{}] struct {
-	instances map[InstanceIdentifier]Instance[T, M]
+// Handler handles multiple instances of RBC broadcasting values of type T
+type Handler[T any] struct {
+	instances map[InstanceIdentifier]Instance[T]
 }
 
-func NewHandler[T any, M interface{}]() *Handler[T, M] {
-	return &Handler[T, M]{
-		instances: make(map[InstanceIdentifier]Instance[T, M]),
+func NewHandler[T any, M interface{}]() *Handler[T] {
+	return &Handler[T]{
+		instances: make(map[InstanceIdentifier]Instance[T]),
 	}
 }
 
 // RegisterIfAbsent registers the given instance if an instance with
 // the same identifier does not already exist. Returns true if the
 // instance was registered, false otherwise
-func (h *Handler[T, M]) RegisterIfAbsent(instance Instance[T, M]) bool {
+func (h *Handler[T]) RegisterIfAbsent(instance Instance[T]) bool {
 	_, ok := h.instances[instance.GetIdentifier()]
 	if !ok {
 		h.instances[instance.GetIdentifier()] = instance
@@ -28,7 +28,7 @@ func (h *Handler[T, M]) RegisterIfAbsent(instance Instance[T, M]) bool {
 
 // Get returns the instance linked to the given instance or ErrNoInstance if
 // there is no such instance
-func (h *Handler[T, M]) Get(identifier InstanceIdentifier) (Instance[T, M], error) {
+func (h *Handler[T]) Get(identifier InstanceIdentifier) (Instance[T], error) {
 	instance, ok := h.instances[identifier]
 	if !ok {
 		return instance, ErrNoInstance
@@ -38,8 +38,9 @@ func (h *Handler[T, M]) Get(identifier InstanceIdentifier) (Instance[T, M], erro
 
 // HandleMessage handles a message destined to a given instance. Returns the result
 // of Instance.HandleMessage
-func (h *Handler[T, M]) HandleMessage(identifier InstanceIdentifier, msg *M) (*M, error) {
-	instance, ok := h.instances[identifier]
+func (h *Handler[T]) HandleMessage(msg Message) (Message, error) {
+	instance, ok := h.instances[msg.GetIdentifier()]
+	msg.GetIdentifier()
 	if !ok {
 		return nil, ErrNoInstance
 	}

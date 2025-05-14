@@ -13,16 +13,16 @@ type NodeIndex int64
 
 // Node can broadcast message and listen to the underlying network for a broadcast
 type Node[T interface{}] struct {
-	NodeIndex
-	AuthenticatedMessageReceiver
-	logger zerolog.Logger
+	nodeIndex NodeIndex
+	receiver  AuthenticatedMessageReceiver
+	logger    zerolog.Logger
 }
 
 func NewNode[T interface{}](index NodeIndex, receiver AuthenticatedMessageReceiver) *Node[T] {
 	return &Node[T]{
-		NodeIndex:                    index,
-		AuthenticatedMessageReceiver: receiver,
-		logger:                       logging.GetLogger(int64(index)),
+		nodeIndex: index,
+		receiver:  receiver,
+		logger:    logging.GetLogger(int64(index)),
 	}
 }
 
@@ -31,7 +31,7 @@ func NewNode[T interface{}](index NodeIndex, receiver AuthenticatedMessageReceiv
 func (n Node[T]) Start(ctx context.Context, handleMsg func(*T) error) error {
 	var returnErr error
 	for returnErr == nil {
-		bs, err := n.Receive(ctx)
+		bs, err := n.receiver.Receive(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				n.logger.Warn().Err(err).Msg("context canceled")
@@ -58,5 +58,5 @@ func (n Node[T]) Start(ctx context.Context, handleMsg func(*T) error) error {
 
 // GetIndex returns the index of this node
 func (n Node[T]) GetIndex() NodeIndex {
-	return n.NodeIndex
+	return n.nodeIndex
 }

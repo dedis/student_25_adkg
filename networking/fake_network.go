@@ -33,16 +33,16 @@ func (n *FakeNetwork) freshID() int64 {
 	return int64(len(n.nodes) + 1)
 }
 
-func (n *FakeNetwork) JoinWithBuffer(size int) *FakeInterface {
+func (n *FakeNetwork) JoinWithBuffer(size int) (*FakeInterface, error) {
 	queue := make(chan []byte, size)
 	iface := NewFakeInterface(queue, n.Send, n.Broadcast, n.freshID())
 
 	n.nodes[iface.id] = iface.rcvQueue
 
-	return iface
+	return iface, nil
 }
 
-func (n *FakeNetwork) JoinNetwork() *FakeInterface {
+func (n *FakeNetwork) JoinNetwork() (*FakeInterface, error) {
 	return n.JoinWithBuffer(10000)
 }
 

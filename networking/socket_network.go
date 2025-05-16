@@ -61,7 +61,7 @@ func (pm *PeerMap) Add(id int64, addr string) {
 	pm.peers[id] = addr
 }
 
-func (n *TransportNetwork) JoinNetwork() (NetworkInterface[[]byte], error) {
+func (n *TransportNetwork) JoinNetwork() (NetworkInterface, error) {
 	bindAddr := "127.0.0.1:0"
 	n.mu.Lock()
 	defer n.mu.Unlock()

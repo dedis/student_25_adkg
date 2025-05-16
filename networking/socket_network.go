@@ -141,7 +141,7 @@ func (n *SocketNetwork) Send(msg []byte, to int64) error {
 }
 
 func (n *SocketNetwork) Broadcast(msg []byte) error {
-	addrMap := n.peers.GetPeers(n.id)
+	addrMap := n.peers.GetPeers(-1)
 	timeout := time.Second
 	for _, addr := range addrMap {
 		// I AM sending to myself as well

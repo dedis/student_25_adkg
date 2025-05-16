@@ -52,7 +52,7 @@ func (n *UDP) CreateSocket(address string) (transport.ClosableSocket, error) {
 	}
 
 	address = conn.LocalAddr().String()
-	log.Info().Msgf("success: created a socket with address:port %s", address)
+	log.Debug().Msgf("success: created a socket with address:port %s", address)
 
 	return &Socket{
 		UDP:    n,
@@ -130,19 +130,15 @@ func (s *Socket) Send(dest string, pkt transport.Packet, timeout time.Duration) 
 		return err
 	}
 
-	n, err := s.conn.WriteToUDP(bytePkt, addr)
+	_, err = s.conn.WriteToUDP(bytePkt, addr)
 	if err != nil {
 		if errors.Is(err, os.ErrDeadlineExceeded) {
-			// logs too verbose
-			// log.Error().Msgf("timeout sending to %s", addr)
 			return transport.TimeoutError(0)
 		}
 		return err
 	}
-	log.Debug().Msgf("%d bytes sent to %s", n, dest)
 
 	s.outs.add(pkt)
-	log.Debug().Msgf("%s sent a message to %s", s.myAddr, dest)
 	s.traffic.LogSent(pkt.Header.RelayedBy, dest, pkt)
 
 	return nil
@@ -177,7 +173,6 @@ func (s *Socket) Recv(timeout time.Duration) (transport.Packet, error) {
 		log.Error().Msgf("%d bytes received, something went wront", n)
 		return transport.Packet{}, err
 	}
-	log.Debug().Msgf("%d bytes read", n)
 
 	// unmarshal and add to ins
 	var pkt transport.Packet

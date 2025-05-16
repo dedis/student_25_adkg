@@ -1,6 +1,5 @@
 package networking
 
-// ChatGPT was here 👀
 // Implementation of the network interface
 // adapted to work on top of dedis/cs438 transport layer
 
@@ -90,8 +89,6 @@ type SocketNetwork struct {
 	stop      chan struct{}
 	recvWg    sync.WaitGroup
 	recvMutex sync.Mutex
-	sent      [][]byte
-	received  [][]byte
 }
 
 // NewSocketNetwork creates a new SocketNetwork with a given socket and ID.
@@ -104,8 +101,6 @@ func NewSocketNetwork(socket transport.Socket, id int64, peers *PeerMap) *Socket
 		peers:    peers,
 		incoming: make(chan []byte, 100),
 		stop:     make(chan struct{}),
-		sent:     make([][]byte, 0),
-		received: make([][]byte, 0),
 	}
 
 	net.recvWg.Add(1)
@@ -133,10 +128,6 @@ func (n *SocketNetwork) Send(msg []byte, to int64) error {
 		return err
 	}
 
-	n.recvMutex.Lock()
-	n.sent = append(n.sent, msg)
-	n.recvMutex.Unlock()
-
 	return nil
 }
 
@@ -158,10 +149,6 @@ func (n *SocketNetwork) Broadcast(msg []byte) error {
 		}
 	}
 
-	n.recvMutex.Lock()
-	n.sent = append(n.sent, msg)
-	n.recvMutex.Unlock()
-
 	return nil
 }
 
@@ -173,7 +160,6 @@ func (n *SocketNetwork) Receive(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("network stopped")
 	case msg := <-n.incoming:
 		n.recvMutex.Lock()
-		n.received = append(n.received, msg)
 		n.recvMutex.Unlock()
 		return msg, nil
 	}
@@ -186,13 +172,22 @@ func (n *SocketNetwork) GetID() int64 {
 func (n *SocketNetwork) GetSent() [][]byte {
 	n.recvMutex.Lock()
 	defer n.recvMutex.Unlock()
-	return append([][]byte(nil), n.sent...)
+	pkts := n.socket.GetOuts()
+	sent := make([][]byte, len(pkts))
+	for i, pkt := range n.socket.GetOuts() {
+		sent[i] = pkt.Msg.Payload
+	}
+	return sent
 }
 
 func (n *SocketNetwork) GetReceived() [][]byte {
 	n.recvMutex.Lock()
-	defer n.recvMutex.Unlock()
-	return append([][]byte(nil), n.received...)
+	pkts := n.socket.GetIns()
+	received := make([][]byte, len(pkts))
+	for i, pkt := range pkts {
+		received[i] = pkt.Msg.Payload
+	}
+	return received
 }
 
 func (n *SocketNetwork) Close() error {

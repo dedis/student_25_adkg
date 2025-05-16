@@ -1,5 +1,6 @@
 package transport
 
+// Copied from DEDIS CS438 course materials
 import (
 	"encoding/json"
 	"errors"

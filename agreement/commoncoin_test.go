@@ -104,7 +104,10 @@ func TestABA_CommonCoin_Simple(t *testing.T) {
 	priShares := priPoly.Shares(nParticipants)
 
 	for i := 0; i < nParticipants; i++ {
-		iface := network.JoinNetwork()
+		iface, err := network.JoinNetwork()
+		if err != nil {
+			panic(err)
+		}
 		abaStream := NewABAStream(iface)
 		nodeConf := &ABACommonConfig{
 			NParticipants: nParticipants,

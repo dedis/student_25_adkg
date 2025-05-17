@@ -9,6 +9,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
+type Logger struct {
+	zerolog.Logger
+}
+
 var (
 	logout = zerolog.ConsoleWriter{
 		Out:        os.Stdout,
@@ -22,6 +26,7 @@ var (
 		PartsOrder: []string{
 			zerolog.TimestampFieldName,
 			zerolog.LevelFieldName,
+			zerolog.CallerFieldName,
 			"nodeID",
 			zerolog.MessageFieldName,
 		},
@@ -31,7 +36,7 @@ var (
 )
 
 // GetLogger returns a formatted logger using the given logger id
-func GetLogger(id int64) zerolog.Logger {
+func GetLogger(id int64) Logger {
 	// Disable logging based on the GLOG environment variable
 	var logLevel zerolog.Level
 	if os.Getenv("GLOG") == "no" {
@@ -40,10 +45,13 @@ func GetLogger(id int64) zerolog.Logger {
 		logLevel = zerolog.InfoLevel
 	}
 
-	return zerolog.New(logout).
-		Level(logLevel).
-		With().
-		Timestamp().
-		Str("nodeID", strconv.FormatInt(id, 10)).
-		Logger()
+	return Logger{
+		Logger: zerolog.New(logout).
+			Level(logLevel).
+			With().
+			Timestamp().
+			Caller().
+			Str("nodeID", strconv.FormatInt(id, 10)).
+			Logger(),
+	}
 }

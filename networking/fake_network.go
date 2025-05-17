@@ -18,7 +18,7 @@ type FakeNetwork struct {
 func NewFakeNetwork() *FakeNetwork {
 	return &FakeNetwork{
 		nodes:    make(map[int64]chan []byte),
-		in:       make(chan []byte, 500),
+		in:       make(chan []byte, 50000),
 		delayMap: make(map[int64]time.Duration),
 	}
 }
@@ -33,17 +33,17 @@ func (n *FakeNetwork) freshID() int64 {
 	return int64(len(n.nodes) + 1)
 }
 
-func (n *FakeNetwork) JoinWithBuffer(size int) *FakeInterface {
+func (n *FakeNetwork) JoinWithBuffer(size int) (*FakeInterface, error) {
 	queue := make(chan []byte, size)
 	iface := NewFakeInterface(queue, n.Send, n.Broadcast, n.freshID())
 
 	n.nodes[iface.id] = iface.rcvQueue
 
-	return iface
+	return iface, nil
 }
 
-func (n *FakeNetwork) JoinNetwork() *FakeInterface {
-	return n.JoinWithBuffer(100)
+func (n *FakeNetwork) JoinNetwork() (*FakeInterface, error) {
+	return n.JoinWithBuffer(10000)
 }
 
 func (n *FakeNetwork) Send(msg []byte, from, to int64) error {
@@ -74,19 +74,6 @@ func (n *FakeNetwork) Broadcast(msg []byte, from int64) error {
 	return nil
 }
 
-// NetworkInterface represents an interface used by a node to communicate in the network
-type NetworkInterface interface {
-	// Send allows to send a byte message to a recipient addressed by an int
-	Send([]byte, int64) error
-	// Broadcast send the given byte message to everyone else in the network
-	Broadcast([]byte) error
-	// Receive waits on the channel for a message to arrive. Blocks until a message arrives or
-	// the channel is written to. This allows stopping before receiving a message
-	Receive(context.Context) ([]byte, error)
-	GetID() int64
-	GetSent() [][]byte
-	GetReceived() [][]byte
-}
 type FakeInterface struct {
 	rcvQueue     chan []byte
 	sendMsg      func([]byte, int64, int64) error

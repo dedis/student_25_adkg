@@ -16,7 +16,8 @@ func Test_fake_network_join(t *testing.T) {
 	expSize := 0
 	// Test adding new nodes and check that they are being added
 	for i := 0; i < nbNodes; i++ {
-		node := network.JoinNetwork()
+		node, err := network.JoinNetwork()
+		require.NoError(t, err)
 		expSize++
 		// Check the list of nodes is updated
 		require.Equal(t, len(network.nodes), expSize)
@@ -30,12 +31,14 @@ func Test_fake_network_Send_Receive(t *testing.T) {
 	network := NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	n1 := network.JoinNetwork()
-	n2 := network.JoinNetwork()
+	n1, err := network.JoinNetwork()
+	require.NoError(t, err)
+	n2, err := network.JoinNetwork()
+	require.NoError(t, err)
 
 	msg := []byte("hello world")
 
-	err := n1.Send(msg, n2.id)
+	err = n1.Send(msg, n2.id)
 	require.NoError(t, err)
 	time.Sleep(1 * time.Second)
 
@@ -53,7 +56,8 @@ func Test_fake_network_Send_Broadcast(t *testing.T) {
 
 	nodes := make([]*FakeInterface, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		node := network.JoinNetwork()
+		node, err := network.JoinNetwork()
+		require.NoError(t, err)
 		nodes[i] = node
 	}
 

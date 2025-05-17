@@ -110,7 +110,7 @@ func NewSocketNetwork(socket transport.Socket, id int64, peers *PeerMap) *Socket
 }
 
 func (n *SocketNetwork) Send(msg []byte, to int64) error {
-	addrMap := n.peers.GetPeers(n.id)
+	addrMap := n.peers.GetPeers(-1)
 	addr, ok := addrMap[to]
 	if !ok {
 		return fmt.Errorf("unknown peer ID: %d", to)

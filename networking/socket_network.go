@@ -5,7 +5,6 @@ package networking
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -22,6 +21,7 @@ type TransportNetwork struct {
 	peers     *PeerMap
 }
 
+// NewNetwork creates a new network instance using the given transport
 func NewTransportNetwork(t transport.Transport) *TransportNetwork {
 	return &TransportNetwork{
 		transport: t,
@@ -54,17 +54,6 @@ func (pm *PeerMap) GetPeers(excludeID int64) map[int64]string {
 	return result
 }
 
-func (pm *PeerMap) GetAllNodes() map[int64]string {
-	pm.RLock()
-	defer pm.RUnlock()
-
-	result := make(map[int64]string)
-	for id, addr := range pm.peers {
-		result[id] = addr
-	}
-	return result
-}
-
 func (pm *PeerMap) Add(id int64, addr string) {
 	pm.Lock()
 	defer pm.Unlock()
@@ -92,8 +81,9 @@ func (n *TransportNetwork) JoinNetwork() (NetworkInterface, error) {
 }
 
 type SocketNetwork struct {
-	socket    transport.Socket
-	id        int64
+	socket transport.Socket
+	id     int64
+	// peers     map[int64]string // mapping from ID to address
 	peers     *PeerMap
 	incoming  chan []byte
 	stop      chan struct{}
@@ -146,6 +136,7 @@ func (n *SocketNetwork) Broadcast(msg []byte) error {
 	timeout := time.Second
 	for _, addr := range addrMap {
 		// I AM sending to myself as well
+
 		header := transport.NewHeader(n.socket.GetAddress(), addr, addr)
 		packet := transport.Packet{
 			Header: &header,
@@ -205,6 +196,7 @@ func (n *SocketNetwork) Close() error {
 	return nil
 }
 
+// Internal goroutine to receive packets.
 func (n *SocketNetwork) receiver() {
 	defer n.recvWg.Done()
 	timeout := time.Second
@@ -216,8 +208,7 @@ func (n *SocketNetwork) receiver() {
 		default:
 			pkt, err := n.socket.Recv(timeout)
 			if err != nil {
-				var timeoutErr transport.TimeoutError
-				if errors.As(err, &timeoutErr) {
+				if _, ok := err.(transport.TimeoutError); ok {
 					continue
 				}
 				// Other errors: assume fatal

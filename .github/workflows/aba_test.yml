@@ -38,4 +38,4 @@ jobs:
           mkdir -p ./${{ github.run_attempt }}
 
       - name: run all ABA related tests
-        run: go test -json -timeout 20m -v -race ./rbc/fourrounds/... | gotestfmt
+        run: go test -json -timeout 20m -v -race ./agreement/... | gotestfmt

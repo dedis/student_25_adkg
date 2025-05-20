@@ -1215,3 +1215,27 @@ func TestFourRoundsRBC_Stress(t *testing.T) {
 	// Run RBC and check the result
 	runAndCheckRBC(t, nodes, nbNodes, s)
 }
+
+// TestFourRoundsRBC_Simple creates a network with a threshold t=2 and n=3*t+1 nodes
+// and start a broadcast from one node. Wait until the algorithm finishes for all nodes
+// and verifies that everyone agreed on the same value.
+func TestFourRoundsRBC_RealNetwork(t *testing.T) {
+	// Config
+	network := networking.NewTransportNetwork(udp.NewUDP())
+
+	threshold := 2
+	nbNodes := 3*threshold + 1
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen)
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		nodes[i] = createDefaultNetworkTestNode(network, mLen)
+	}
+
+	// Run RBC and check the result
+	runAndCheckRBC(t, nodes, nbNodes, s)
+}

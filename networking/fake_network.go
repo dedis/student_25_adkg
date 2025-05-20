@@ -42,7 +42,7 @@ func (n *FakeNetwork) JoinWithBuffer(size int) (*FakeInterface, error) {
 	return iface, nil
 }
 
-func (n *FakeNetwork) JoinNetwork() (*FakeInterface, error) {
+func (n *FakeNetwork) JoinNetwork() (NetworkInterface, error) {
 	return n.JoinWithBuffer(10000)
 }
 

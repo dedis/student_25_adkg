@@ -140,14 +140,10 @@ func (f *FourRoundRBC) handleMessage(instruction *typedefs.Instruction) (bool, e
 	finished := false
 	switch op := instruction.GetOperation().GetOp().(type) {
 	case *typedefs.Message_ProposeInst:
-		f.log.Info().Msg("Received propose message")
 		err = f.receivePropose(op.ProposeInst)
 	case *typedefs.Message_EchoInst:
-		f.log.Info().Msgf("Received echo message with nodeID %d and msg: %x",
-			op.EchoInst.GetIndex(), op.EchoInst.GetEncodingShare())
 		err = f.receiveEcho(op.EchoInst)
 	case *typedefs.Message_ReadyInst:
-		f.log.Info().Msg("Received ready message")
 		finished, err = f.receiveReady(op.ReadyInst)
 	default:
 		err = xerrors.New("Invalid operation")
@@ -181,7 +177,6 @@ func (f *FourRoundRBC) receivePropose(msg *typedefs.Message_Propose) error {
 			return err
 		}
 	}
-	f.log.Info().Msgf("Sent %d echo messages", len(encodings))
 	return nil
 }
 

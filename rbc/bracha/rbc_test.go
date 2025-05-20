@@ -38,7 +38,8 @@ func runRBCWithValue(t *testing.T, val bool) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		stream := network.JoinNetwork()
+		stream, err := network.JoinNetwork()
+		require.NoError(t, err)
 		node := NewTestNode(stream, NewBrachaRBC(defaultPredicate, threshold, stream, int64(i)))
 		nodes[i] = node
 	}

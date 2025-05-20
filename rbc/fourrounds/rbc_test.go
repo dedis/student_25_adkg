@@ -8,6 +8,7 @@ import (
 	"student_25_adkg/networking"
 	"student_25_adkg/rbc/fourrounds/typedefs"
 	"student_25_adkg/reedsolomon"
+	"student_25_adkg/transport/udp"
 	"sync"
 	"testing"
 	"time"
@@ -132,8 +133,10 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		interfaces[i] = iface.(*networking.FakeInterface)
-		startDummyNode(ctx, iface)
+		casted, ok := iface.(*networking.FakeInterface)
+		require.True(t, ok)
+		interfaces[i] = casted
+		startDummyNode(ctx, casted)
 	}
 
 	// Send a PROPOSE message to the test node and check that it answers correctly
@@ -252,9 +255,11 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		interfaces[i] = iface.(*networking.FakeInterface)
+		casted, ok := iface.(*networking.FakeInterface)
+		require.True(t, ok)
+		interfaces[i] = casted
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, iface)
+		startDummyNode(ctx, casted)
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -368,9 +373,11 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		interfaces[i] = iface.(*networking.FakeInterface)
+		casted, ok := iface.(*networking.FakeInterface)
+		require.True(t, ok)
+		interfaces[i] = casted
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, iface)
+		startDummyNode(ctx, casted)
 	}
 
 	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
@@ -491,9 +498,11 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		interfaces[i] = iface.(*networking.FakeInterface)
+		casted, ok := iface.(*networking.FakeInterface)
+		require.True(t, ok)
+		interfaces[i] = casted
 		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, iface)
+		startDummyNode(ctx, casted)
 	}
 
 	// Create a READY message

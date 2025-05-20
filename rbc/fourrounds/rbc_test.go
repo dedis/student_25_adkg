@@ -8,7 +8,6 @@ import (
 	"student_25_adkg/networking"
 	"student_25_adkg/rbc/fourrounds/typedefs"
 	"student_25_adkg/reedsolomon"
-	"student_25_adkg/transport/udp"
 	"sync"
 	"testing"
 	"time"

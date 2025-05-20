@@ -7,9 +7,9 @@ message Message{
   }
 
   message Echo{
-    bytes encodingShare=1;
+    repeated bytes encodingShares=1;
     bytes messageHash=2;
-    int64 index=3;
+    repeated int64 sharesIndices=3;
   }
 
   message Ready{

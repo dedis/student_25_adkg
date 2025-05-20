@@ -145,77 +145,61 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	require.NoError(t, err)
 	proposeMessage := createProposeMessage(s)
 	proposeBytes, err := proto.Marshal(proposeMessage)
-	if err != nil {
-		panic(err)
-	}
+	require.NoError(t, err)
 
 	err = interfaces[1].Send(proposeBytes, node.GetID())
 	require.NoError(t, err)
-	t.Logf("Sent PROPOSE message to %d", node.GetID())
 
 	// Wait a second for message to have been sent
 	time.Sleep(100 * time.Millisecond)
 
-	// Expect each interface to have received an echo message for each chunk
-	for i, iface := range interfaces {
-		sent := iface.GetSent()
-
-		if i == 1 {
-			require.Equal(t, 1, len(sent))
-		} else {
-			// Expect that no interface sent anything
-			require.Equal(t, 0, len(sent))
-		}
-
+	// Expect each interface to have received one ECHO message from the node
+	for _, iface := range interfaces {
 		received := iface.GetReceived()
 
-		// The node who received the PROPOSE should have sent an ECHO message for to each node (but all broadcast i.e.
-		// each node received nbNodes ECHO messages
-		require.Equal(t, nbNodes, len(received))
+		// Should have received the ECHO message from the node
+		require.Equal(t, 1, len(received))
 
-		// Check that the messages received are ECHO and that the hash matches
-		for j := 0; j < len(received); j++ {
-			bs := received[j]
-			msg := &typedefs.Instruction{}
-			err = proto.Unmarshal(bs, msg)
-			require.NoError(t, err)
-			switch op := msg.Operation.Op.(type) {
-			case *typedefs.Message_EchoInst:
-				require.Equal(t, int64(j), op.EchoInst.GetIndex())
-				require.True(t, bytes.Equal(op.EchoInst.GetMessageHash(), sHash))
-			default:
-				require.Fail(t, "Unexpected message type: %T", msg)
-			}
-		}
+		// Check that the message received is an ECHO and that the hash matches
+		bs := received[0]
+		msg := &typedefs.Instruction{}
+		err = proto.Unmarshal(bs, msg)
+		require.NoError(t, err)
+		echoMessage, ok := msg.GetOperation().GetOp().(*typedefs.Message_EchoInst)
+		require.True(t, ok)
+		require.True(t, bytes.Equal(echoMessage.EchoInst.GetMessageHash(), sHash))
 	}
 
 	// Check the messages sent and received by the real node
 	nSent := node.GetSent()
 
-	// Node should have sent a broadcast to each node
-	require.Equal(t, nbNodes, len(nSent))
+	// Node should have sent an ECHO broadcast
+	require.Equal(t, 1, len(nSent))
 
 	nReceived := node.GetReceived()
-	// Node should have received the PROPOSE message and its own broadcasts
-	require.Equal(t, 1+nbNodes, len(nReceived))
+	// Node should have received the PROPOSE message and its own ECHO broadcast
+	require.Equal(t, 2, len(nReceived))
 
-	// Try to reconstruct from the encoded messages
+	// Try to reconstruct from the ECHO message
 	messages := interfaces[0].GetReceived()
-	chunks := make([]reedsolomon.Encoding, nbNodes)
-	for i := 0; i < len(messages); i++ {
-		bs := messages[i]
-		msg := &typedefs.Instruction{}
-		err = proto.Unmarshal(bs, msg)
-		require.NoError(t, err)
-		switch op := msg.GetOperation().GetOp().(type) {
-		case *typedefs.Message_EchoInst:
-			chunks[op.EchoInst.GetIndex()] = reedsolomon.Encoding{
-				Idx: op.EchoInst.GetIndex(),
-				Val: op.EchoInst.GetEncodingShare(),
-			}
-		default:
-			require.Fail(t, "Unexpected message type: %T", msg)
+	bs := messages[0]
+	msg := &typedefs.Instruction{}
+	err = proto.Unmarshal(bs, msg)
+	require.NoError(t, err)
+	echoMessage, ok := msg.GetOperation().GetOp().(*typedefs.Message_EchoInst)
+	require.True(t, ok)
+
+	// The ECHO message should have a share for each node
+	require.Equal(t, nbNodes, len(echoMessage.EchoInst.GetEncodingShares()))
+
+	chunks := make([]*reedsolomon.Encoding, nbNodes)
+	for i := range echoMessage.EchoInst.GetEncodingShares() {
+		index := echoMessage.EchoInst.GetSharesIndices()[i]
+		chunks[index] = &reedsolomon.Encoding{
+			Idx: index,
+			Val: echoMessage.EchoInst.GetEncodingShares()[i],
 		}
+
 	}
 
 	require.Equal(t, nbNodes, len(chunks))
@@ -262,9 +246,14 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 		startDummyNode(ctx, casted)
 	}
 
-	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
+	fakeShare := []*reedsolomon.Encoding{
+		{
+			Idx: node.rbc.nodeID,
+			Val: []byte{1, 2, 3, 4},
+		},
+	}
 	hash := []byte{5, 6, 7, 8}
-	echoMsg := createEchoMessage(fakeMi, hash, node.rbc.nodeID)
+	echoMsg := createEchoMessage(fakeShare, hash)
 	echoBytes, err := proto.Marshal(echoMsg)
 	require.NoError(t, err)
 
@@ -286,22 +275,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 		require.Equal(t, 0, len(nSent))
 	}
 
-	// Sent an ECHO message for another share of the encoding and expect nothing to happen
-	echoMsg2 := createEchoMessage(fakeMi, hash, interfaces[0].GetID())
-	echoBytes2, err := proto.Marshal(echoMsg2)
-	require.NoError(t, err)
-	err = interfaces[0].Send(echoBytes2, node.GetID())
-	require.NoError(t, err)
-	sent++
-
 	time.Sleep(10 * time.Millisecond)
-
-	nReceived := node.GetReceived()
-	// Should have received all messages
-	require.Equal(t, sent, len(nReceived))
-	nSent := node.GetSent()
-	// Should have sent nothing yet
-	require.Equal(t, 0, len(nSent))
 
 	// Sent another echo and expect a ready message to be broadcast
 	err = interfaces[0].Send(echoBytes, node.GetID())
@@ -310,11 +284,11 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	// Wait sometime to leave time for the node to have sent all its messages
 	time.Sleep(10 * time.Millisecond)
 
-	nReceived = node.GetReceived()
+	nReceived := node.GetReceived()
 	// Should have received every ECHO message plus its own broadcast
 	require.Equal(t, sent+1, len(nReceived))
 
-	nSent = node.GetSent()
+	nSent := node.GetSent()
 	// Should have sent a READY broadcast
 	require.Equal(t, 1, len(nSent))
 
@@ -380,9 +354,14 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 		startDummyNode(ctx, casted)
 	}
 
-	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
+	fakeShare := []*reedsolomon.Encoding{
+		{
+			Idx: node.rbc.nodeID,
+			Val: []byte{1, 2, 3, 4},
+		},
+	}
 	hash := []byte{5, 6, 7, 8}
-	readyMsg := createReadyMessage(fakeMi, hash, node.GetID())
+	readyMsg := createReadyMessage(fakeShare[0].Val, hash, fakeShare[0].Idx)
 	readyBytes, err := proto.Marshal(readyMsg)
 	require.NoError(t, err)
 
@@ -426,7 +405,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	}
 
 	// Send t ECHO messages for the node and nothing should happen
-	echoMsg := createEchoMessage(fakeMi, hash, node.GetID())
+	echoMsg := createEchoMessage(fakeShare, hash)
 	echoBytes, err := proto.Marshal(echoMsg)
 	require.NoError(t, err)
 
@@ -506,14 +485,19 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	}
 
 	// Create a READY message
-	fakeMi := []byte{1, 2, 3, 4} // Arbitrary
-	hash := []byte{5, 6, 7, 8}   // Arbitrary
-	readyMsg := createReadyMessage(fakeMi, hash, node.GetID())
+	fakeShare := []*reedsolomon.Encoding{
+		{
+			Idx: node.rbc.nodeID,
+			Val: []byte{1, 2, 3, 4},
+		},
+	}
+	hash := []byte{5, 6, 7, 8} // Arbitrary
+	readyMsg := createReadyMessage(fakeShare[0].Val, hash, fakeShare[0].Idx)
 	readyBytes, err := proto.Marshal(readyMsg)
 	require.NoError(t, err)
 
 	// Create an ECHO message
-	echoMsg := createEchoMessage(fakeMi, hash, node.GetID())
+	echoMsg := createEchoMessage(fakeShare, hash)
 	echoBytes, err := proto.Marshal(echoMsg)
 	require.NoError(t, err)
 
@@ -1225,7 +1209,7 @@ func TestFourRoundsRBC_Stress(t *testing.T) {
 	runAndCheckRBC(t, nodes, nbNodes, s)
 }
 
-// TestFourRoundsRBC_Simple creates a network with a threshold t=2 and n=3*t+1 nodes
+// TestFourRoundsRBC_RealNetwork creates a UDP network with a threshold t=2 and n=3*t+1 nodes
 // and start a broadcast from one node. Wait until the algorithm finishes for all nodes
 // and verifies that everyone agreed on the same value.
 func TestFourRoundsRBC_RealNetwork(t *testing.T) {
@@ -1243,6 +1227,35 @@ func TestFourRoundsRBC_RealNetwork(t *testing.T) {
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		nodes[i] = createDefaultNetworkTestNode(network, mLen)
+	}
+
+	// Run RBC and check the result
+	runAndCheckRBC(t, nodes, nbNodes, s)
+}
+
+// TestFourRoundsRBC_RealNetworkStress creates a large UDP network with a threshold t=20 and n=3*t+1 nodes
+// and start a broadcast from one node. Wait until the algorithm finishes for all nodes
+// and verifies that everyone agreed on the same value.
+func TestFourRoundsRBC_RealNetworkStress(t *testing.T) {
+	// Config
+	network := networking.NewTransportNetwork(udp.NewUDP())
+
+	threshold := 20
+	nbNodes := 3*threshold + 1
+	r := 2
+
+	// Randomly generate the value to broadcast
+	mLen := threshold + 1 // Arbitrary message length
+	s := generateMessage(mLen)
+
+	// Set up the nodes
+	nodes := make([]*TestNode, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		nIface, err := network.JoinNetwork()
+		require.NoError(t, err)
+		rs := reedsolomon.NewBWCodes(mLen, nbNodes)
+		node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
+		nodes[i] = node
 	}
 
 	// Run RBC and check the result

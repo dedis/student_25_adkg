@@ -27,7 +27,7 @@ type FourRoundRBC struct {
 	echoCount           map[string]int
 	readyCounts         map[string]int
 	readyEncodingShares map[string]map[string]struct{}
-	th                  []reedsolomon.Encoding
+	th                  []*reedsolomon.Encoding
 	r                   int
 	finalValue          []byte
 	finished            bool
@@ -50,7 +50,7 @@ func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 		echoCount:           make(map[string]int),
 		readyCounts:         make(map[string]int),
 		readyEncodingShares: make(map[string]map[string]struct{}),
-		th:                  make([]reedsolomon.Encoding, 0),
+		th:                  make([]*reedsolomon.Encoding, 0),
 		r:                   r,
 		finalValue:          nil,
 		finished:            false,
@@ -170,12 +170,10 @@ func (f *FourRoundRBC) receivePropose(msg *typedefs.Message_Propose) error {
 	}
 
 	// Broadcast an echo message for each encoding
-	for _, Mi := range encodings {
-		echoInst := createEchoMessage(Mi.Val, h, Mi.Idx)
-		err = f.broadcastInstruction(echoInst)
-		if err != nil {
-			return err
-		}
+	echoInst := createEchoMessage(encodings, h)
+	err = f.broadcastInstruction(echoInst)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -183,11 +181,6 @@ func (f *FourRoundRBC) receivePropose(msg *typedefs.Message_Propose) error {
 func (f *FourRoundRBC) receiveEcho(msg *typedefs.Message_Echo) error {
 	f.Lock()
 	defer f.Unlock()
-
-	// Ignore ECHO message that are not for our index
-	if msg.GetIndex() != f.nodeID {
-		return nil
-	}
 
 	count, ok := f.echoCount[string(msg.GetMessageHash())]
 	if !ok {
@@ -202,20 +195,23 @@ func (f *FourRoundRBC) receiveEcho(msg *typedefs.Message_Echo) error {
 		readyCount = 0
 	}
 	readyThreshold := f.checkReadyThreshold(readyCount)
-	sendReady := f.checkEchoThreshold(count, readyThreshold) && !f.sentReady
+	echoThreshold := f.checkEchoThreshold(count, readyThreshold)
+	sendReady := echoThreshold && !f.sentReady
 
 	if !sendReady {
 		return nil
 	}
 
+	nodeShare := msg.GetEncodingShares()[f.nodeID-1]
+	nodeShareIndex := msg.GetSharesIndices()[f.nodeID-1]
+
 	// Send the ready message and set sentReady
-	inst := createReadyMessage(msg.GetEncodingShare(), msg.GetMessageHash(), msg.GetIndex())
+	inst := createReadyMessage(nodeShare, msg.GetMessageHash(), nodeShareIndex)
 	err := f.broadcastInstruction(inst)
 	if err != nil {
 		return err
 	}
 	f.sentReady = true
-	f.log.Printf("Sent Ready message for %x", msg.GetEncodingShare())
 	return nil
 }
 
@@ -231,7 +227,8 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 	f.readyCounts[string(msg.GetMessageHash())] = count
 
 	echoes, ok := f.echoCount[string(msg.GetMessageHash())]
-	sendReady := ok && !f.sentReady && f.checkReadyThreshold(count) && f.checkReadyThreshold(echoes)
+	readyThreshold := f.checkReadyThreshold(count)
+	sendReady := ok && !f.sentReady && readyThreshold && f.checkEchoThreshold(echoes, true)
 
 	if sendReady {
 		// Send the ready message and set sentReady
@@ -242,33 +239,31 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 			return false, err
 		}
 		f.sentReady = true
-		f.log.Printf("Sent Ready message for %x", msg.GetEncodingShare())
 	}
 
 	firstTime := f.addReadyEncodingShareIfFirstTimeSeen(string(msg.GetMessageHash()), string(msg.GetEncodingShare()))
 
-	// If this value is seen for the first time, add it to T_h and try to reconstruct
-	if firstTime {
-		f.log.Printf("Received first ready message for %x", msg.GetEncodingShare())
-		f.th = append(f.th, reedsolomon.Encoding{
-			Val: msg.GetEncodingShare(),
-			Idx: msg.GetIndex(),
-		})
-		f.log.Printf("Got %d messges in th", len(f.th))
-		// Try to reconstruct
-
-		value, finished, err := f.reconstruct(msg.GetMessageHash())
-		if err != nil {
-			f.log.Printf("Failed to reconstruct: %v", err)
-		}
-		if finished {
-			f.finalValue = value
-			f.finished = true
-			return true, nil
-		}
+	if !firstTime {
+		return false, nil
 	}
 
-	return false, nil
+	// If this value is seen for the first time, add it to T_h and try to reconstruct
+	f.th = append(f.th, &reedsolomon.Encoding{
+		Val: msg.GetEncodingShare(),
+		Idx: msg.GetIndex(),
+	})
+
+	// Try to reconstruct
+	value, finished, err := f.reconstruct(msg.GetMessageHash())
+	if err != nil {
+		f.log.Err(err).Msg("failed to reconstruct")
+	}
+	if finished {
+		f.finalValue = value
+		f.finished = true
+	}
+
+	return finished, nil
 }
 
 // addReadyEncodingShareIfFirstTimeSeen chek if the given share of the encoding corresponding
@@ -291,12 +286,10 @@ func (f *FourRoundRBC) addReadyEncodingShareIfFirstTimeSeen(messageHash, encodin
 }
 
 func (f *FourRoundRBC) reconstruct(expHash []byte) ([]byte, bool, error) {
+	if len(f.th) < 2*f.threshold+1 {
+		return nil, false, nil
+	}
 	for ri := 0; ri < f.r; ri++ {
-		if len(f.th) < 2*f.threshold+ri+1 {
-			// If it is not the case now, it won't be in the next iteration since r increases
-			return nil, false, nil
-		}
-
 		coefficients, err := f.rs.Decode(f.th)
 		if err != nil {
 			return nil, false, err
@@ -334,11 +327,18 @@ func createReadyMessage(mi, h []byte, i int64) *typedefs.Instruction {
 	return inst
 }
 
-func createEchoMessage(mi, h []byte, i int64) *typedefs.Instruction {
+func createEchoMessage(shares []*reedsolomon.Encoding, h []byte) *typedefs.Instruction {
+	sharesBytes := make([][]byte, len(shares))
+	sharesIndices := make([]int64, len(shares))
+	for i, s := range shares {
+		sharesIndices[i] = s.Idx
+		sharesBytes[i] = s.Val
+	}
+
 	echoMsg := &typedefs.Message_Echo{
-		EncodingShare: mi,
-		MessageHash:   h,
-		Index:         i,
+		EncodingShares: sharesBytes,
+		MessageHash:    h,
+		SharesIndices:  sharesIndices,
 	}
 	msg := &typedefs.Message{Op: &typedefs.Message_EchoInst{EchoInst: echoMsg}}
 	inst := &typedefs.Instruction{Operation: msg}

@@ -5,6 +5,7 @@ package networking
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -208,7 +209,8 @@ func (n *SocketNetwork) receiver() {
 		default:
 			pkt, err := n.socket.Recv(timeout)
 			if err != nil {
-				if _, ok := err.(transport.TimeoutError); ok {
+				var timeoutError transport.TimeoutError
+				if errors.As(err, &timeoutError) {
 					continue
 				}
 				// Other errors: assume fatal

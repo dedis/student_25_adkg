@@ -18,11 +18,13 @@ func Test_fake_network_join(t *testing.T) {
 	for i := 0; i < nbNodes; i++ {
 		node, err := network.JoinNetwork()
 		require.NoError(t, err)
+		fakeInterface, ok := node.(*FakeInterface)
+		require.True(t, ok)
 		expSize++
 		// Check the list of nodes is updated
 		require.Equal(t, len(network.nodes), expSize)
 		// Check that the given queue is updated
-		require.Equal(t, network.nodes[node.id], node.rcvQueue)
+		require.Equal(t, network.nodes[fakeInterface.id], fakeInterface.rcvQueue)
 	}
 }
 
@@ -38,7 +40,7 @@ func Test_fake_network_Send_Receive(t *testing.T) {
 
 	msg := []byte("hello world")
 
-	err = n1.Send(msg, n2.id)
+	err = n1.Send(msg, n2.GetID())
 	require.NoError(t, err)
 	time.Sleep(1 * time.Second)
 
@@ -58,7 +60,9 @@ func Test_fake_network_Send_Broadcast(t *testing.T) {
 	for i := 0; i < nbNodes; i++ {
 		node, err := network.JoinNetwork()
 		require.NoError(t, err)
-		nodes[i] = node
+		casted, ok := node.(*FakeInterface)
+		require.True(t, ok)
+		nodes[i] = casted
 	}
 
 	n1 := nodes[0]

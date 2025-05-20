@@ -8,6 +8,7 @@ import (
 	"student_25_adkg/networking"
 	"student_25_adkg/rbc/fourrounds/typedefs"
 	"student_25_adkg/reedsolomon"
+	"student_25_adkg/transport/udp"
 	"sync"
 	"testing"
 	"time"
@@ -60,7 +61,7 @@ func createTestNodeWithDelay(network *networking.FakeNetwork, threshold, r, nbNo
 	return node
 }
 
-func createDefaultNetworkTestNode(network *networking.FakeNetwork, mLen int) *TestNode {
+func createDefaultNetworkTestNode(network networking.Network, mLen int) *TestNode {
 	threshold := 2
 	r := 2
 	nbNodes := 3*threshold + 1
@@ -132,7 +133,7 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		interfaces[i] = iface
+		interfaces[i] = iface.(*networking.FakeInterface)
 		startDummyNode(ctx, iface)
 	}
 
@@ -252,7 +253,7 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		interfaces[i] = iface
+		interfaces[i] = iface.(*networking.FakeInterface)
 		// Start the interface to just receive messages and do nothing with them
 		startDummyNode(ctx, iface)
 	}
@@ -368,7 +369,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		interfaces[i] = iface
+		interfaces[i] = iface.(*networking.FakeInterface)
 		// Start the interface to just receive messages and do nothing with them
 		startDummyNode(ctx, iface)
 	}
@@ -491,7 +492,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	for i := 0; i < nbNodes-1; i++ {
 		iface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		interfaces[i] = iface
+		interfaces[i] = iface.(*networking.FakeInterface)
 		// Start the interface to just receive messages and do nothing with them
 		startDummyNode(ctx, iface)
 	}

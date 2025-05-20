@@ -21,11 +21,11 @@ func NewBWCodes(k, n int) *BWCodes {
 	}
 }
 
-func (rs *BWCodes) Encode(msg []byte) ([]Encoding, error) {
-	shares := make([]Encoding, rs.fec.Total())
+func (rs *BWCodes) Encode(msg []byte) ([]*Encoding, error) {
+	shares := make([]*Encoding, rs.fec.Total())
 	output := func(s infectious.Share) {
 		sCopy := s.DeepCopy()
-		shares[s.Number] = Encoding{
+		shares[s.Number] = &Encoding{
 			Idx: int64(sCopy.Number),
 			Val: sCopy.Data,
 		}
@@ -35,13 +35,13 @@ func (rs *BWCodes) Encode(msg []byte) ([]Encoding, error) {
 	return shares, err
 }
 
-func (rs *BWCodes) Decode(msg []Encoding) ([]byte, error) {
+func (rs *BWCodes) Decode(msg []*Encoding) ([]byte, error) {
 	shares := encodingsToShares(msg)
 	res, err := rs.fec.Decode(nil, shares)
 	return res, err
 }
 
-func encodingsToShares(encodings []Encoding) []infectious.Share {
+func encodingsToShares(encodings []*Encoding) []infectious.Share {
 	shares := make([]infectious.Share, len(encodings))
 	for i, encoding := range encodings {
 		shares[i] = infectious.Share{

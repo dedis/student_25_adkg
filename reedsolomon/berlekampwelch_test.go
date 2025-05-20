@@ -9,7 +9,7 @@ import (
 	"go.dedis.ch/kyber/v4/group/edwards25519"
 )
 
-func checkEncoding(t *testing.T, expected []byte, encoded []Encoding, decoder RSDecoder) {
+func checkEncoding(t *testing.T, expected []byte, encoded []*Encoding, decoder RSDecoder) {
 	// Decode the message
 	decoded, err := decoder.Decode(encoded)
 	require.NoError(t, err)

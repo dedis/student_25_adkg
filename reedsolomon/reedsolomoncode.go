@@ -8,12 +8,12 @@ type Encoding struct {
 
 type RSEncoder interface {
 	// Encode encodes the given message into a list of Encodings
-	Encode(msg []byte) ([]Encoding, error)
+	Encode(msg []byte) ([]*Encoding, error)
 }
 
 type RSDecoder interface {
 	// Decode takes a set of Encodings to be decoded. Returns the decoded bytes or an error
-	Decode(msg []Encoding) ([]byte, error)
+	Decode(msg []*Encoding) ([]byte, error)
 }
 
 // RSCodes is an interface representing an implementation of Reed-Solomon codes that

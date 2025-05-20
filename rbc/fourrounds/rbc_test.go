@@ -50,7 +50,10 @@ func defaultPredicate([]byte) bool {
 
 func createTestNodeWithDelay(network *networking.FakeNetwork, threshold, r, nbNodes,
 	mLen int, delay time.Duration) *TestNode {
-	nIface := network.JoinNetwork()
+	nIface, err := network.JoinNetwork()
+	if err != nil {
+		panic(err)
+	}
 	network.DelayNode(nIface.GetID(), delay)
 	rs := reedsolomon.NewBWCodes(mLen, nbNodes)
 	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
@@ -61,7 +64,10 @@ func createDefaultNetworkTestNode(network *networking.FakeNetwork, mLen int) *Te
 	threshold := 2
 	r := 2
 	nbNodes := 3*threshold + 1
-	nIface := network.JoinNetwork()
+	nIface, err := network.JoinNetwork()
+	if err != nil {
+		panic(err)
+	}
 	rs := reedsolomon.NewBWCodes(mLen, nbNodes)
 	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
 	return node
@@ -124,7 +130,8 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	// want to see what these interfaces receive from the real node
 	interfaces := make([]*networking.FakeInterface, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
-		iface := network.JoinNetwork()
+		iface, err := network.JoinNetwork()
+		require.NoError(t, err)
 		interfaces[i] = iface
 		startDummyNode(ctx, iface)
 	}
@@ -243,7 +250,8 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	// want to see what these interfaces receive from the real node
 	interfaces := make([]*networking.FakeInterface, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
-		iface := network.JoinNetwork()
+		iface, err := network.JoinNetwork()
+		require.NoError(t, err)
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
 		startDummyNode(ctx, iface)
@@ -358,7 +366,8 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	// want to see what these interfaces receive from the real node
 	interfaces := make([]*networking.FakeInterface, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
-		iface := network.JoinNetwork()
+		iface, err := network.JoinNetwork()
+		require.NoError(t, err)
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
 		startDummyNode(ctx, iface)
@@ -480,7 +489,8 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	// want to see what these interfaces receive from the real node
 	interfaces := make([]*networking.FakeInterface, nbNodes-1)
 	for i := 0; i < nbNodes-1; i++ {
-		iface := network.JoinNetwork()
+		iface, err := network.JoinNetwork()
+		require.NoError(t, err)
 		interfaces[i] = iface
 		// Start the interface to just receive messages and do nothing with them
 		startDummyNode(ctx, iface)
@@ -677,7 +687,8 @@ func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := network.JoinNetwork()
+		stream, err := network.JoinNetwork()
+		require.NoError(t, err)
 		deadNodes[i] = stream
 	}
 
@@ -711,7 +722,8 @@ func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := network.JoinNetwork()
+		stream, err := network.JoinNetwork()
+		require.NoError(t, err)
 		deadNodes[i] = stream
 	}
 
@@ -746,7 +758,8 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 	for i := 0; i < nbDead; i++ {
 		// Dead nodes just mean a node that joins the network but never receives or sends anything
 		// i.e. creating a stream but never using it
-		stream := network.JoinNetwork()
+		stream, err := network.JoinNetwork()
+		require.NoError(t, err)
 		deadNodes[i] = stream
 	}
 
@@ -895,7 +908,8 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 
 	// Create a dying dealer. We don't need to actually create an RBC instance, we just need to send the PROPOSE
 	// from some node in the network and never answer after that
-	dyingDealer := network.JoinNetwork()
+	dyingDealer, err := network.JoinNetwork()
+	require.NoError(t, err)
 
 	// Start RBC from the dying dealer
 	inst := createProposeMessage(s)
@@ -1190,7 +1204,8 @@ func TestFourRoundsRBC_Stress(t *testing.T) {
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		// Create a custom node with a special sized buffer
-		iface := network.JoinWithBuffer(4000)
+		iface, err := network.JoinWithBuffer(4000)
+		require.NoError(t, err)
 		rs := reedsolomon.NewBWCodes(mLen, nbNodes)
 		node := NewTestNode(iface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, iface,
 			rs, r, iface.GetID()))

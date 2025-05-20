@@ -208,12 +208,12 @@ func (x *Message_Propose) GetContent() []byte {
 }
 
 type Message_Echo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EncodingShare []byte                 `protobuf:"bytes,1,opt,name=encodingShare,proto3" json:"encodingShare,omitempty"`
-	MessageHash   []byte                 `protobuf:"bytes,2,opt,name=messageHash,proto3" json:"messageHash,omitempty"`
-	Index         int64                  `protobuf:"varint,3,opt,name=index,proto3" json:"index,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	EncodingShares [][]byte               `protobuf:"bytes,1,rep,name=encodingShares,proto3" json:"encodingShares,omitempty"`
+	MessageHash    []byte                 `protobuf:"bytes,2,opt,name=messageHash,proto3" json:"messageHash,omitempty"`
+	SharesIndices  []int64                `protobuf:"varint,3,rep,packed,name=sharesIndices,proto3" json:"sharesIndices,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Message_Echo) Reset() {
@@ -246,9 +246,9 @@ func (*Message_Echo) Descriptor() ([]byte, []int) {
 	return file_messages_proto_rawDescGZIP(), []int{0, 1}
 }
 
-func (x *Message_Echo) GetEncodingShare() []byte {
+func (x *Message_Echo) GetEncodingShares() [][]byte {
 	if x != nil {
-		return x.EncodingShare
+		return x.EncodingShares
 	}
 	return nil
 }
@@ -260,11 +260,11 @@ func (x *Message_Echo) GetMessageHash() []byte {
 	return nil
 }
 
-func (x *Message_Echo) GetIndex() int64 {
+func (x *Message_Echo) GetSharesIndices() []int64 {
 	if x != nil {
-		return x.Index
+		return x.SharesIndices
 	}
-	return 0
+	return nil
 }
 
 type Message_Ready struct {
@@ -331,18 +331,18 @@ var File_messages_proto protoreflect.FileDescriptor
 
 const file_messages_proto_rawDesc = "" +
 	"\n" +
-	"\x0emessages.proto\x12\btypedefs\"\xb2\x03\n" +
+	"\x0emessages.proto\x12\btypedefs\"\xc4\x03\n" +
 	"\aMessage\x12>\n" +
 	"\fpropose_inst\x18\x03 \x01(\v2\x19.typedefs.Message.ProposeH\x00R\vproposeInst\x125\n" +
 	"\techo_inst\x18\x04 \x01(\v2\x16.typedefs.Message.EchoH\x00R\bechoInst\x128\n" +
 	"\n" +
 	"ready_inst\x18\x05 \x01(\v2\x17.typedefs.Message.ReadyH\x00R\treadyInst\x1a#\n" +
 	"\aPropose\x12\x18\n" +
-	"\acontent\x18\x01 \x01(\fR\acontent\x1ad\n" +
-	"\x04Echo\x12$\n" +
-	"\rencodingShare\x18\x01 \x01(\fR\rencodingShare\x12 \n" +
-	"\vmessageHash\x18\x02 \x01(\fR\vmessageHash\x12\x14\n" +
-	"\x05index\x18\x03 \x01(\x03R\x05index\x1ae\n" +
+	"\acontent\x18\x01 \x01(\fR\acontent\x1av\n" +
+	"\x04Echo\x12&\n" +
+	"\x0eencodingShares\x18\x01 \x03(\fR\x0eencodingShares\x12 \n" +
+	"\vmessageHash\x18\x02 \x01(\fR\vmessageHash\x12$\n" +
+	"\rsharesIndices\x18\x03 \x03(\x03R\rsharesIndices\x1ae\n" +
 	"\x05Ready\x12$\n" +
 	"\rencodingShare\x18\x01 \x01(\fR\rencodingShare\x12 \n" +
 	"\vmessageHash\x18\x02 \x01(\fR\vmessageHash\x12\x14\n" +

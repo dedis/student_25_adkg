@@ -22,6 +22,7 @@ var (
 		PartsOrder: []string{
 			zerolog.TimestampFieldName,
 			zerolog.LevelFieldName,
+			zerolog.CallerFieldName,
 			"nodeID",
 			zerolog.MessageFieldName,
 		},
@@ -44,6 +45,7 @@ func GetLogger(id int64) zerolog.Logger {
 		Level(logLevel).
 		With().
 		Timestamp().
+		Caller().
 		Str("nodeID", strconv.FormatInt(id, 10)).
 		Logger()
 }

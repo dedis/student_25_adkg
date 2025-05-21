@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/csv"
 	"errors"
-	"fmt"
 	"os"
 	"strconv"
 	"student_25_adkg/networking"
@@ -18,7 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func runWithParameters(t *testing.T, ctx context.Context, threshold int, message []byte, messageLength int) (time.Duration, int) {
+func runWithParameters(ctx context.Context, t *testing.T, threshold int,
+	message []byte, messageLength int) (time.Duration, int) {
 	// Config
 	network := networking.NewTransportNetwork(udp.NewUDP())
 
@@ -37,7 +37,7 @@ func runWithParameters(t *testing.T, ctx context.Context, threshold int, message
 
 	// Run RBC and check the result
 	start := time.Now()
-	runBroadcastWithContext(t, ctx, nodes, nbNodes, message)
+	runBroadcastWithContext(ctx, t, nodes, nbNodes, message)
 	end := time.Now()
 	elapsed := end.Sub(start)
 
@@ -45,7 +45,7 @@ func runWithParameters(t *testing.T, ctx context.Context, threshold int, message
 	return elapsed, received
 }
 
-func runBroadcastWithContext(t *testing.T, ctx context.Context, nodes []*TestNode, nbNodes int, msg []byte) {
+func runBroadcastWithContext(ctx context.Context, t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
 	// Create a wait group to wait for all bracha instances to finish
 	wg := sync.WaitGroup{}
 	n1 := nodes[0]
@@ -85,7 +85,7 @@ func TestRBC_Benchmark_Message(t *testing.T) {
 	idx := 0
 	for threshold := minThreshold; threshold <= maxThreshold; threshold++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		duration, messagesCount := runWithParameters(t, ctx, threshold, message, messageLength)
+		duration, messagesCount := runWithParameters(ctx, t, threshold, message, messageLength)
 
 		cancel()
 
@@ -106,7 +106,6 @@ func saveToCSV(timings []time.Duration, thresholds, messagesCounts []int) {
 	// Open file for writing
 	file, err := os.Create("output.csv")
 	if err != nil {
-		fmt.Println("Error creating file:", err)
 		return
 	}
 	defer file.Close()
@@ -116,7 +115,10 @@ func saveToCSV(timings []time.Duration, thresholds, messagesCounts []int) {
 	defer writer.Flush()
 
 	// Write header
-	writer.Write([]string{"Timing(ms)", "Threshold", "MessageCount"})
+	err = writer.Write([]string{"Timing(ms)", "Threshold", "MessageCount"})
+	if err != nil {
+		panic(err)
+	}
 
 	// Write data rows
 	for i := 0; i < len(timings); i++ {
@@ -126,9 +128,7 @@ func saveToCSV(timings []time.Duration, thresholds, messagesCounts []int) {
 			strconv.Itoa(messagesCounts[i]),
 		}
 		if err := writer.Write(row); err != nil {
-			fmt.Println("Error writing row:", err)
+			continue
 		}
 	}
-
-	fmt.Println("CSV file written successfully.")
 }

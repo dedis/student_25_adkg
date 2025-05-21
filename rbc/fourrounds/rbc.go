@@ -24,15 +24,14 @@ type FourRoundRBC struct {
 	threshold int
 	sentReady bool
 	sync.RWMutex
-	echoCount           map[string]int
-	readyCounts         map[string]int
-	readyEncodingShares map[string]map[string]struct{}
-	th                  []*reedsolomon.Encoding
-	r                   int
-	finalValue          []byte
-	finished            bool
-	log                 zerolog.Logger
-	nodeID              int64
+	echoCount   map[string]int
+	readyCounts map[string]int
+	readyShares map[string]map[*reedsolomon.Encoding]struct{}
+	r           int
+	finalValue  []byte
+	finished    bool
+	log         zerolog.Logger
+	nodeID      int64
 }
 
 func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
@@ -40,22 +39,21 @@ func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 	rs reedsolomon.RSCodes, r int, nodeID int64) *FourRoundRBC {
 
 	return &FourRoundRBC{
-		iface:               iface,
-		predicate:           predicate,
-		Hash:                h,
-		rs:                  rs,
-		threshold:           threshold,
-		sentReady:           false,
-		RWMutex:             sync.RWMutex{},
-		echoCount:           make(map[string]int),
-		readyCounts:         make(map[string]int),
-		readyEncodingShares: make(map[string]map[string]struct{}),
-		th:                  make([]*reedsolomon.Encoding, 0),
-		r:                   r,
-		finalValue:          nil,
-		finished:            false,
-		log:                 logging.GetLogger(nodeID),
-		nodeID:              nodeID,
+		iface:       iface,
+		predicate:   predicate,
+		Hash:        h,
+		rs:          rs,
+		threshold:   threshold,
+		sentReady:   false,
+		RWMutex:     sync.RWMutex{},
+		echoCount:   make(map[string]int),
+		readyCounts: make(map[string]int),
+		readyShares: make(map[string]map[*reedsolomon.Encoding]struct{}),
+		r:           r,
+		finalValue:  nil,
+		finished:    false,
+		log:         logging.GetLogger(nodeID),
+		nodeID:      nodeID,
 	}
 }
 
@@ -78,7 +76,8 @@ func (f *FourRoundRBC) broadcast(bs []byte) error {
 }
 
 // start listens for packet on the interface and handles them. Returns a channel that will
-// // return nil when the protocol finishes or an error if it stopped or any other reason
+// return nil when the protocol finishes or an error if it stopped or any other reason.
+// The go routine only stops when the channel is canceled
 func (f *FourRoundRBC) start(ctx context.Context) chan error {
 	returnChan := make(chan error)
 	go func() {
@@ -86,7 +85,7 @@ func (f *FourRoundRBC) start(ctx context.Context) chan error {
 			bs, err := f.iface.Receive(ctx)
 			if err != nil {
 				// Stop looping if the context was stopped
-				if errors.Is(err, context.Canceled) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					returnChan <- err
 					return
 				}
@@ -106,7 +105,6 @@ func (f *FourRoundRBC) start(ctx context.Context) chan error {
 				continue
 			}
 			if finished {
-				f.log.Err(err).Msg("Protocol terminated")
 				returnChan <- err
 				return
 			}
@@ -241,20 +239,16 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 		f.sentReady = true
 	}
 
-	firstTime := f.addReadyEncodingShareIfFirstTimeSeen(string(msg.GetMessageHash()), string(msg.GetEncodingShare()))
-
-	if !firstTime {
-		return false, nil
-	}
-
-	// If this value is seen for the first time, add it to T_h and try to reconstruct
-	f.th = append(f.th, &reedsolomon.Encoding{
+	share := &reedsolomon.Encoding{
 		Val: msg.GetEncodingShare(),
 		Idx: msg.GetIndex(),
-	})
+	}
+
+	_ = f.addReadyShareIfAbsent(share, msg.GetMessageHash())
 
 	// Try to reconstruct
-	value, finished, err := f.reconstruct(msg.GetMessageHash())
+	shares := f.getSharesForMessage(msg.GetMessageHash())
+	value, finished, err := f.reconstruct(shares, msg.GetMessageHash())
 	if err != nil {
 		f.log.Err(err).Msg("failed to reconstruct")
 	}
@@ -266,43 +260,54 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) (bool, error) {
 	return finished, nil
 }
 
-// addReadyEncodingShareIfFirstTimeSeen chek if the given share of the encoding corresponding
-// to the hashed message has already been received. If not, mark as received. Return
-// true if it was the first time. False otherwise and nothing happens
-func (f *FourRoundRBC) addReadyEncodingShareIfFirstTimeSeen(messageHash, encodingShare string) bool {
-	hashEncodingShare, ok := f.readyEncodingShares[messageHash]
-
+func (f *FourRoundRBC) getSharesForMessage(messageHash []byte) []*reedsolomon.Encoding {
+	messageShares, ok := f.readyShares[string(messageHash)]
 	if !ok {
-		hashEncodingShare = make(map[string]struct{})
+		return nil
 	}
-	_, notFirst := hashEncodingShare[encodingShare]
-
-	// Put the value in the map
-	hashEncodingShare[encodingShare] = struct{}{}
-	// Update the map
-	f.readyEncodingShares[messageHash] = hashEncodingShare
-
-	return !notFirst
+	shares := make([]*reedsolomon.Encoding, 0, len(messageShares))
+	for messageShare, _ := range messageShares {
+		shares = append(shares, messageShare)
+	}
+	return shares
 }
 
-func (f *FourRoundRBC) reconstruct(expHash []byte) ([]byte, bool, error) {
-	if len(f.th) < 2*f.threshold+1 {
+// addReadyShareIfAbsent chek if the given share of the corresponding
+// message hash has already been received. If not, save it. Return
+// true if it was absent and added to the map. False otherwise
+func (f *FourRoundRBC) addReadyShareIfAbsent(share *reedsolomon.Encoding, messageHash []byte) bool {
+	messageReadyShares, ok := f.readyShares[string(messageHash)]
+
+	if !ok {
+		messageReadyShares = make(map[*reedsolomon.Encoding]struct{})
+	}
+	// Check if the share is already in the map
+	_, ok = messageReadyShares[share]
+
+	// Put the value in the map (if it was already in, nothing will happen)
+	messageReadyShares[share] = struct{}{}
+	// Update the map
+	f.readyShares[string(messageHash)] = messageReadyShares
+
+	return !ok
+}
+
+func (f *FourRoundRBC) reconstruct(shares []*reedsolomon.Encoding, expHash []byte) ([]byte, bool, error) {
+	if len(shares) < 2*f.threshold+1 {
 		return nil, false, nil
 	}
-	for ri := 0; ri < f.r; ri++ {
-		coefficients, err := f.rs.Decode(f.th)
-		if err != nil {
-			return nil, false, err
-		}
+	coefficients, err := f.rs.Decode(shares)
+	if err != nil {
+		return nil, false, err
+	}
 
-		h, err := f.FreshHash(coefficients)
-		if err != nil {
-			return nil, false, err
-		}
+	h, err := f.FreshHash(coefficients)
+	if err != nil {
+		return nil, false, err
+	}
 
-		if bytes.Equal(h, expHash) {
-			return coefficients, true, nil
-		}
+	if bytes.Equal(h, expHash) {
+		return coefficients, true, nil
 	}
 	return nil, false, nil
 }
@@ -363,4 +368,10 @@ func (f *FourRoundRBC) checkEchoThreshold(count int, hashReady bool) bool {
 
 func (f *FourRoundRBC) checkReadyThreshold(count int) bool {
 	return count >= (f.threshold + 1)
+}
+
+func (f *FourRoundRBC) GetFinalValue() []byte {
+	f.RLock()
+	defer f.RUnlock()
+	return f.finalValue
 }

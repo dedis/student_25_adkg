@@ -71,16 +71,15 @@ func runBroadcastWithContext(ctx context.Context, t *testing.T, nodes []*TestNod
 
 func TestRBC_Benchmark_Message(t *testing.T) {
 	minThreshold := 2
-	maxThreshold := 23
+	maxThreshold := 30
 
-	steps := maxThreshold - minThreshold + 1
-
-	message := generateMessage(2)
 	messageLength := 2
+	message := generateMessage(messageLength)
 
-	thresholds := make([]int, steps)
-	durations := make([]time.Duration, steps)
-	messagesCounts := make([]int, steps)
+	size := maxThreshold - minThreshold + 1
+	thresholds := make([]int, size)
+	durations := make([]time.Duration, size)
+	messagesCounts := make([]int, size)
 
 	idx := 0
 	for threshold := minThreshold; threshold <= maxThreshold; threshold++ {

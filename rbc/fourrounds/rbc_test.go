@@ -10,6 +10,7 @@ import (
 	"student_25_adkg/reedsolomon"
 	"student_25_adkg/transport/udp"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -354,23 +355,29 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 		startDummyNode(ctx, casted)
 	}
 
-	fakeShare := []*reedsolomon.Encoding{
-		{
-			Idx: node.rbc.nodeID,
-			Val: []byte{1, 2, 3, 4},
-		},
+	fakeShares := make([]*reedsolomon.Encoding, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		shareBytes := make([]byte, 4)
+		for j := 0; j < 4; j++ {
+			shareBytes[j] = byte(4*i + j)
+		}
+		fakeShares[i] = &reedsolomon.Encoding{
+			Idx: int64(i),
+			Val: shareBytes,
+		}
 	}
 	hash := []byte{5, 6, 7, 8}
-	readyMsg := createReadyMessage(fakeShare[0].Val, hash, fakeShare[0].Idx)
-	readyBytes, err := proto.Marshal(readyMsg)
-	require.NoError(t, err)
 
 	readyThreshold := threshold + 1
 
 	// Send t READY messages and expect nothing each time
 	sent := 0
+	sharedIdx := 0
 	for i := 0; i < readyThreshold-1; i++ {
-		err := interfaces[0].Send(readyBytes, node.GetID())
+		readyMsg := createReadyMessage(fakeShares[sharedIdx].Val, hash, fakeShares[0].Idx)
+		readyBytes, err := proto.Marshal(readyMsg)
+		require.NoError(t, err)
+		err = interfaces[0].Send(readyBytes, node.GetID())
 		require.NoError(t, err)
 		sent++
 
@@ -383,12 +390,18 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 		nSent := node.GetSent()
 		// Should not have sent anything
 		require.Equal(t, 0, len(nSent))
+
+		sharedIdx++
 	}
 
 	// Send t+1 message and expect nothing
+	readyMsg := createReadyMessage(fakeShares[sharedIdx].Val, hash, fakeShares[0].Idx)
+	readyBytes, err := proto.Marshal(readyMsg)
+	require.NoError(t, err)
 	err = interfaces[0].Send(readyBytes, node.GetID())
 	require.NoError(t, err)
 	sent++
+	sharedIdx++
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -405,7 +418,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	}
 
 	// Send t ECHO messages for the node and nothing should happen
-	echoMsg := createEchoMessage(fakeShare, hash)
+	echoMsg := createEchoMessage(fakeShares, hash)
 	echoBytes, err := proto.Marshal(echoMsg)
 	require.NoError(t, err)
 
@@ -484,20 +497,23 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 		startDummyNode(ctx, casted)
 	}
 
-	// Create a READY message
-	fakeShare := []*reedsolomon.Encoding{
-		{
-			Idx: node.rbc.nodeID,
-			Val: []byte{1, 2, 3, 4},
-		},
+	// Create a fake shares
+	fakeShares := make([]*reedsolomon.Encoding, nbNodes)
+	for i := 0; i < nbNodes; i++ {
+		shareBytes := make([]byte, 4)
+		for j := 0; j < 4; j++ {
+			shareBytes[j] = byte(4*i + j)
+		}
+		fakeShares[i] = &reedsolomon.Encoding{
+			Idx: int64(i),
+			Val: shareBytes,
+		}
 	}
 	hash := []byte{5, 6, 7, 8} // Arbitrary
-	readyMsg := createReadyMessage(fakeShare[0].Val, hash, fakeShare[0].Idx)
-	readyBytes, err := proto.Marshal(readyMsg)
-	require.NoError(t, err)
+	shareIdx := 0
 
 	// Create an ECHO message
-	echoMsg := createEchoMessage(fakeShare, hash)
+	echoMsg := createEchoMessage(fakeShares, hash)
 	echoBytes, err := proto.Marshal(echoMsg)
 	require.NoError(t, err)
 
@@ -524,9 +540,13 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	readyThreshold := threshold + 1
 	// Send t READY messages and expect nothing each time
 	for i := 0; i < readyThreshold-1; i++ {
-		err := interfaces[0].Send(readyBytes, node.GetID())
+		readyMsg := createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
+		readyBytes, err := proto.Marshal(readyMsg)
+		require.NoError(t, err)
+		err = interfaces[0].Send(readyBytes, node.GetID())
 		require.NoError(t, err)
 		sent++
+		shareIdx++
 
 		time.Sleep(10 * time.Millisecond)
 
@@ -540,7 +560,15 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	}
 
 	// Send the t+1 and t+2 READY message and expect one READY broadcast
+	readyMsg := createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
+	readyBytes, err := proto.Marshal(readyMsg)
+	require.NoError(t, err)
 	err = interfaces[0].Send(readyBytes, node.GetID())
+	require.NoError(t, err)
+
+	shareIdx++
+	readyMsg = createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
+	readyBytes, err = proto.Marshal(readyMsg)
 	require.NoError(t, err)
 	err = interfaces[0].Send(readyBytes, node.GetID())
 	require.NoError(t, err)
@@ -587,6 +615,8 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 func runBroadcast(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var finishedCount atomic.Int64
+
 	// Create a wait group to wait for all bracha instances to finish
 	wg := sync.WaitGroup{}
 	n1 := nodes[0]
@@ -599,13 +629,16 @@ func runBroadcast(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
 				// Log
 				t.Logf("Error listening: %v", err)
 			}
-			t.Logf("Node %d done", i)
+			finishedCount.Add(1)
+			t.Logf("Node %d done, %d/%d nodes finished", i, finishedCount.Load(), nbNodes)
+
 		}()
 	}
 	// Start RBC
 	err := n1.rbc.RBroadcast(ctx, msg)
 	t.Log("Broadcast complete")
 	require.NoError(t, err)
+	finishedCount.Add(1)
 
 	wg.Wait()
 	cancel()
@@ -617,7 +650,7 @@ func runBroadcast(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
 func checkRBCResult(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
 	for i := 0; i < nbNodes; i++ {
 		n := nodes[i]
-		val := n.rbc.finalValue
+		val := n.rbc.GetFinalValue()
 		finished := n.rbc.finished
 		require.True(t, finished)
 		require.True(t, len(msg) == len(val))
@@ -1240,7 +1273,7 @@ func TestFourRoundsRBC_RealNetworkStress(t *testing.T) {
 	// Config
 	network := networking.NewTransportNetwork(udp.NewUDP())
 
-	threshold := 20
+	threshold := 40
 	nbNodes := 3*threshold + 1
 	r := 2
 

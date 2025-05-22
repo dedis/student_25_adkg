@@ -70,6 +70,7 @@ func runBroadcastWithContext(ctx context.Context, t *testing.T, nodes []*TestNod
 }
 
 func TestRBC_Benchmark_Message(t *testing.T) {
+	t.Skip("Skipping this test by default. Run explicitly if needed.")
 	minThreshold := 2
 	maxThreshold := 30
 

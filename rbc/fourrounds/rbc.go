@@ -266,7 +266,7 @@ func (f *FourRoundRBC) getSharesForMessage(messageHash []byte) []*reedsolomon.En
 		return nil
 	}
 	shares := make([]*reedsolomon.Encoding, 0, len(messageShares))
-	for messageShare, _ := range messageShares {
+	for messageShare := range messageShares {
 		shares = append(shares, messageShare)
 	}
 	return shares

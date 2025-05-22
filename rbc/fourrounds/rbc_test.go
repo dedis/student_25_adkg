@@ -401,7 +401,6 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	err = interfaces[0].Send(readyBytes, node.GetID())
 	require.NoError(t, err)
 	sent++
-	sharedIdx++
 
 	time.Sleep(10 * time.Millisecond)
 

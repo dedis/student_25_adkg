@@ -14,30 +14,65 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 )
 
-func runWithParameters(ctx context.Context, t *testing.T, threshold int,
-	message []byte, messageLength int) (time.Duration, int) {
-	// Config
+func createNetwork(threshold int) (networking.Network, []*TestNode, error) {
 	network := networking.NewTransportNetwork(udp.NewUDP())
 
 	nbNodes := 3*threshold + 1
-	r := 2
 
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		nIface, err := network.JoinNetwork()
-		require.NoError(t, err)
-		rs := reedsolomon.NewBWCodes(messageLength, nbNodes)
-		node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
+		if err != nil {
+			return network, nil, err
+		}
+		rs := reedsolomon.NewBWCodes(threshold+1, nbNodes)
+		node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
 		nodes[i] = node
 	}
+	return network, nodes, nil
+}
+
+func startNodes(ctx context.Context, log func(string, ...any), nodes []*TestNode) *sync.WaitGroup {
+	// Create a wait group to wait for all bracha instances to finish
+	wg := sync.WaitGroup{}
+	for _, node := range nodes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := node.rbc.Listen(ctx)
+			if err != nil {
+				// Log
+				log("Error listening: %v", err)
+			}
+		}()
+	}
+	return &wg
+}
+
+func runWithParameters(ctx context.Context, t *testing.B, threshold int,
+	message []byte) (time.Duration, int) {
+	// Config
+	_, nodes, err := createNetwork(threshold)
+	require.NoError(t, err)
+
+	// Start all nodes but the dealer (idx 0)
+	wg := startNodes(ctx, t.Logf, nodes[1:])
+
+	dealer := nodes[0]
 
 	// Run RBC and check the result
 	start := time.Now()
-	runBroadcastWithContext(ctx, t, nodes, nbNodes, message)
+	// Start RBC
+	err = dealer.rbc.RBroadcast(ctx, message)
+	require.NoError(t, err)
+	t.Log("Broadcast complete")
+
+	wg.Wait()
 	end := time.Now()
 	elapsed := end.Sub(start)
 
@@ -45,31 +80,35 @@ func runWithParameters(ctx context.Context, t *testing.T, threshold int,
 	return elapsed, received
 }
 
-func runBroadcastWithContext(ctx context.Context, t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
-	// Create a wait group to wait for all bracha instances to finish
-	wg := sync.WaitGroup{}
-	n1 := nodes[0]
-	for i := 1; i < nbNodes; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := nodes[i].rbc.Listen(ctx)
-			if err != nil {
-				// Log
-				t.Logf("Error listening: %v", err)
-			}
-			t.Logf("Node %d done", i)
-		}()
-	}
-	// Start RBC
-	err := n1.rbc.RBroadcast(ctx, msg)
-	t.Log("Broadcast complete")
-	require.NoError(t, err)
+func Benchmark_Threshold20(b *testing.B) {
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	threshold := 20
 
-	wg.Wait()
+	message := generateMessage(threshold + 1)
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, nodes, err := createNetwork(threshold)
+		require.NoError(b, err)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+
+		// Start the nodes
+		wg := startNodes(ctx, b.Logf, nodes[1:])
+
+		dealer := nodes[0]
+
+		// Start RBC
+		err = dealer.rbc.RBroadcast(ctx, message)
+		require.NoError(b, err)
+
+		wg.Wait()
+		cancel()
+	}
+
+	b.ReportAllocs()
 }
 
-func TestRBC_Benchmark_Message(t *testing.T) {
+func BenchmarkRBC_TimingsMessages(t *testing.B) {
 	t.Skip("Skipping this test by default. Run explicitly if needed.")
 	minThreshold := 2
 	maxThreshold := 30
@@ -85,7 +124,7 @@ func TestRBC_Benchmark_Message(t *testing.T) {
 	idx := 0
 	for threshold := minThreshold; threshold <= maxThreshold; threshold++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		duration, messagesCount := runWithParameters(ctx, t, threshold, message, messageLength)
+		duration, messagesCount := runWithParameters(ctx, t, threshold, message)
 
 		cancel()
 

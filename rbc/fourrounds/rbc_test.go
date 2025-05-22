@@ -50,7 +50,7 @@ func defaultPredicate([]byte) bool {
 	return true
 }
 
-func createTestNodeWithDelay(network *networking.FakeNetwork, threshold, r, nbNodes,
+func createTestNodeWithDelay(network *networking.FakeNetwork, threshold, nbNodes,
 	mLen int, delay time.Duration) *TestNode {
 	nIface, err := network.JoinNetwork()
 	if err != nil {
@@ -809,7 +809,6 @@ func TestFourRoundsRBC_SlowNode(t *testing.T) {
 	network := networking.NewFakeNetwork()
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 	nbSlow := 1
 
@@ -823,7 +822,7 @@ func TestFourRoundsRBC_SlowNode(t *testing.T) {
 		if i >= nbNodes-nbSlow {
 			// Set up the slow nodes with half a second of delay when sending packets
 			delay := time.Millisecond * 500
-			nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
+			nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
 		} else {
 			// All other nodes don't have delay
 			nodes[i] = createDefaultNetworkTestNode(network, mLen)
@@ -843,7 +842,6 @@ func TestFourRoundsRBC_SlowNodes(t *testing.T) {
 	network := networking.NewFakeNetwork()
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 	nbSlow := 3
 
@@ -856,7 +854,7 @@ func TestFourRoundsRBC_SlowNodes(t *testing.T) {
 	for i := 0; i < nbNodes; i++ {
 		if i > nbNodes-nbSlow {
 			delay := time.Millisecond * 500
-			nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
+			nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
 		} else {
 			// All other nodes don't have delay
 			nodes[i] = createDefaultNetworkTestNode(network, mLen)
@@ -875,7 +873,6 @@ func TestFourRoundsRBC_SlowNodesStress(t *testing.T) {
 	network := networking.NewFakeNetwork()
 
 	threshold := 4
-	r := 3
 	nbNodes := 3*threshold + 1
 	delay := time.Millisecond * 200
 
@@ -886,7 +883,7 @@ func TestFourRoundsRBC_SlowNodesStress(t *testing.T) {
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
+		nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
 	}
 
 	// Run and check RBC, it should work normally only slower
@@ -1001,7 +998,6 @@ func TestFourRoundsRBC_DealAndStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
@@ -1013,7 +1009,7 @@ func TestFourRoundsRBC_DealAndStop(t *testing.T) {
 	for i := 0; i < nbNodes; i++ {
 		// Add a bit of delay when reading to leave time for the dealer node to be stopped
 		delay := time.Millisecond * 10
-		nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
+		nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
 	}
 
 	// Set all nodes to listen except from one which will be the dealer
@@ -1065,7 +1061,6 @@ func TestFourRoundsRBC_ListenerDies(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
@@ -1077,7 +1072,7 @@ func TestFourRoundsRBC_ListenerDies(t *testing.T) {
 	for i := 0; i < nbNodes; i++ {
 		// Add a bit of delay when reading to leave time for the dealer node to be stopped
 		delay := time.Millisecond * 10
-		nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
+		nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
 	}
 
 	// Set all nodes to listen except from one which will be the dealer and the one that will fail
@@ -1137,7 +1132,6 @@ func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 	nbFailing := 2
 
@@ -1150,7 +1144,7 @@ func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
 	for i := 0; i < nbNodes; i++ {
 		// Add a bit of delay when reading to leave time for the dealer node to be stopped
 		delay := time.Millisecond * 10
-		nodes[i] = createTestNodeWithDelay(network, threshold, r, nbNodes, mLen, delay)
+		nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
 	}
 
 	// Set all nodes to listen except from one which will be the dealer and the one that will fail

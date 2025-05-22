@@ -27,7 +27,6 @@ type FourRoundRBC struct {
 	echoCount   map[string]int
 	readyCounts map[string]int
 	readyShares map[string]map[*reedsolomon.Encoding]struct{}
-	r           int
 	finalValue  []byte
 	finished    bool
 	log         zerolog.Logger
@@ -36,7 +35,7 @@ type FourRoundRBC struct {
 
 func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 	iface rbc.AuthenticatedMessageStream,
-	rs reedsolomon.RSCodes, r int, nodeID int64) *FourRoundRBC {
+	rs reedsolomon.RSCodes, nodeID int64) *FourRoundRBC {
 
 	return &FourRoundRBC{
 		iface:       iface,
@@ -49,7 +48,6 @@ func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 		echoCount:   make(map[string]int),
 		readyCounts: make(map[string]int),
 		readyShares: make(map[string]map[*reedsolomon.Encoding]struct{}),
-		r:           r,
 		finalValue:  nil,
 		finished:    false,
 		log:         logging.GetLogger(nodeID),

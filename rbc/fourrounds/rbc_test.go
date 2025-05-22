@@ -58,20 +58,19 @@ func createTestNodeWithDelay(network *networking.FakeNetwork, threshold, r, nbNo
 	}
 	network.DelayNode(nIface.GetID(), delay)
 	rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
+	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
 	return node
 }
 
 func createDefaultNetworkTestNode(network networking.Network, mLen int) *TestNode {
 	threshold := 2
-	r := 2
 	nbNodes := 3*threshold + 1
 	nIface, err := network.JoinNetwork()
 	if err != nil {
 		panic(err)
 	}
 	rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
+	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
 	return node
 }
 
@@ -1218,7 +1217,6 @@ func TestFourRoundsRBC_Stress(t *testing.T) {
 	network := networking.NewFakeNetwork()
 
 	threshold := 20
-	r := 3
 	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
@@ -1233,7 +1231,7 @@ func TestFourRoundsRBC_Stress(t *testing.T) {
 		require.NoError(t, err)
 		rs := reedsolomon.NewBWCodes(mLen, nbNodes)
 		node := NewTestNode(iface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, iface,
-			rs, r, iface.GetID()))
+			rs, iface.GetID()))
 		nodes[i] = node
 	}
 
@@ -1274,19 +1272,17 @@ func TestFourRoundsRBC_RealNetworkStress(t *testing.T) {
 
 	threshold := 40
 	nbNodes := 3*threshold + 1
-	r := 2
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	s := generateMessage(threshold + 1)
 
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
 	for i := 0; i < nbNodes; i++ {
 		nIface, err := network.JoinNetwork()
 		require.NoError(t, err)
-		rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-		node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, r, nIface.GetID()))
+		rs := reedsolomon.NewBWCodes(threshold+1, nbNodes)
+		node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
 		nodes[i] = node
 	}
 

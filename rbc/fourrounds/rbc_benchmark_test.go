@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createNetwork(threshold int) (networking.Network, []*TestNode, error) {
+func createNetwork(threshold int) ([]*TestNode, error) {
 	network := networking.NewTransportNetwork(udp.NewUDP())
 
 	nbNodes := 3*threshold + 1
@@ -28,13 +28,13 @@ func createNetwork(threshold int) (networking.Network, []*TestNode, error) {
 	for i := 0; i < nbNodes; i++ {
 		nIface, err := network.JoinNetwork()
 		if err != nil {
-			return network, nil, err
+			return nil, err
 		}
 		rs := reedsolomon.NewBWCodes(threshold+1, nbNodes)
 		node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
 		nodes[i] = node
 	}
-	return network, nodes, nil
+	return nodes, nil
 }
 
 func startNodes(ctx context.Context, log func(string, ...any), nodes []*TestNode) *sync.WaitGroup {
@@ -57,7 +57,7 @@ func startNodes(ctx context.Context, log func(string, ...any), nodes []*TestNode
 func runWithParameters(ctx context.Context, t *testing.B, threshold int,
 	message []byte) (time.Duration, int) {
 	// Config
-	_, nodes, err := createNetwork(threshold)
+	nodes, err := createNetwork(threshold)
 	require.NoError(t, err)
 
 	// Start all nodes but the dealer (idx 0)
@@ -88,7 +88,7 @@ func Benchmark_Threshold20(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, nodes, err := createNetwork(threshold)
+		nodes, err := createNetwork(threshold)
 		require.NoError(b, err)
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 

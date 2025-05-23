@@ -5,14 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/csv"
 	"errors"
-	"fmt"
 	"os"
 	"strconv"
 	"student_25_adkg/networking"
 	"student_25_adkg/reedsolomon"
 	"student_25_adkg/transport/udp"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,7 +71,6 @@ func getState(node *TestNode, messageHash []byte, tryDuration time.Duration) (*S
 
 func waitForResult(t require.TestingT, nodes []*TestNode, messageHash []byte, expectSuccess bool) *sync.WaitGroup {
 	wg := &sync.WaitGroup{}
-	var counter atomic.Int64
 	// Allow retrying to get the instance
 	waitInstanceTimeout := 1 * time.Second
 	for _, node := range nodes {
@@ -87,16 +84,13 @@ func waitForResult(t require.TestingT, nodes []*TestNode, messageHash []byte, ex
 				// If the state could not be found, then we require that it was not expected
 				// to succeed in order to pass the test
 				require.False(t, expectSuccess, "state not found")
-				wg.Done()
-				return
+			} else {
+				// Wait for the state to finish
+				<-state.GetFinishedChan()
+
+				require.Equal(t, expectSuccess, state.Success())
 			}
 
-			// Wait for the state to finish
-			<-state.GetFinishedChan()
-
-			require.Equal(t, expectSuccess, state.Success())
-			counter.Add(1)
-			fmt.Printf("Node %d done (%d/%d)\n", node.GetID(), counter.Load(), len(nodes))
 			wg.Done()
 		}()
 	}

@@ -180,13 +180,10 @@ func (f *FourRoundRBC) receiveEcho(msg *typedefs.Message_Echo) error {
 		// Send the ready message and set sentReady
 		inst := createReadyMessage(nodeShare, msg.GetMessageHash(), nodeShareIndex)
 		err = f.broadcastInstruction(inst)
-		if err != nil {
-			return false
-		}
-		return true
+		return err == nil
 	})
 
-	return nil
+	return err
 }
 
 func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) error {
@@ -199,16 +196,20 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) error {
 	sendReady := !state.SentReady() && readyThreshold && f.checkEchoThreshold(echoCount, true)
 
 	if sendReady {
+		var err error
 		// Atomically try to send the ready message and set sentReady
 		state.SetSentReadyOnSuccess(func() bool {
 			inst := createReadyMessage(msg.GetEncodingShare(), msg.GetMessageHash(), msg.GetIndex())
-			err := f.broadcastInstruction(inst)
+			err = f.broadcastInstruction(inst)
 			if err != nil {
 				f.log.Err(err).Msg("Failed to broadcast ready message")
 				return false
 			}
 			return true
 		})
+		if err != nil {
+			return err
+		}
 	}
 
 	share := &reedsolomon.Encoding{

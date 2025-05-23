@@ -9,6 +9,7 @@ import (
 	"student_25_adkg/rbc/fourrounds/typedefs"
 	"student_25_adkg/reedsolomon"
 	"student_25_adkg/transport/udp"
+	"sync"
 	"testing"
 	"time"
 
@@ -951,5 +952,43 @@ func TestFourRoundsRBC_RealNetworkStress(t *testing.T) {
 
 	// Run RBC and check the result
 	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
+}
+
+func TestFourRoundsRBC_MultipleInstances(t *testing.T) {
+	// Config
+	ctx, cancel := context.WithCancel(context.Background())
+	network := networking.NewTransportNetwork(udp.NewUDP())
+	threshold := 2
+	nbNodes := threshold*3 + 1
+
+	nbInstances := 3
+	require.LessOrEqual(t, nbInstances, nbNodes, "Need at least %d nodes to run %d instances", nbInstances, nbInstances)
+
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
+
+	startNodes(ctx, t, nodes, context.Canceled)
+
+	wgs := sync.WaitGroup{}
+	for i := 0; i < nbInstances; i++ {
+		message, hash := generateMessage(threshold + 1)
+		dealer := nodes[i]
+
+		wg := waitForResult(ctx, t, nodes, hash, true)
+
+		err := dealer.rbc.RBroadcast(message)
+		require.NoError(t, err)
+
+		wgs.Add(1)
+		go func() {
+			wg.Wait()
+			checkRBCResult(t, nodes, message, hash)
+			wgs.Done()
+		}()
+	}
+
+	wgs.Wait()
+
 	cancel()
 }

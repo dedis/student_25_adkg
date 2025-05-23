@@ -20,11 +20,12 @@ type FourRoundRBC struct {
 	iface     rbc.AuthenticatedMessageStream
 	predicate func([]byte) bool
 	hash.Hash
-	rs        reedsolomon.RSCodes
-	threshold int
-	states    map[string]*State
-	log       zerolog.Logger
-	nodeID    int64
+	rs              reedsolomon.RSCodes
+	threshold       int
+	states          map[string]*State
+	finishedChannel chan *State
+	log             zerolog.Logger
+	nodeID          int64
 	sync.RWMutex
 }
 
@@ -33,15 +34,16 @@ func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 	rs reedsolomon.RSCodes, nodeID int64) *FourRoundRBC {
 
 	return &FourRoundRBC{
-		iface:     iface,
-		predicate: predicate,
-		Hash:      h,
-		rs:        rs,
-		threshold: threshold,
-		RWMutex:   sync.RWMutex{},
-		states:    make(map[string]*State),
-		log:       logging.GetLogger(nodeID),
-		nodeID:    nodeID,
+		iface:           iface,
+		predicate:       predicate,
+		Hash:            h,
+		rs:              rs,
+		threshold:       threshold,
+		RWMutex:         sync.RWMutex{},
+		states:          make(map[string]*State),
+		finishedChannel: make(chan *State, 100),
+		log:             logging.GetLogger(nodeID),
+		nodeID:          nodeID,
 	}
 }
 
@@ -75,6 +77,7 @@ func (f *FourRoundRBC) Listen(ctx context.Context) error {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				// Cancel all running instances
 				f.stopInstances()
+				close(f.finishedChannel)
 				return err
 			}
 			f.log.Err(err).Msg("Error receiving message")
@@ -227,6 +230,7 @@ func (f *FourRoundRBC) receiveReady(msg *typedefs.Message_Ready) error {
 	}
 	if finished {
 		state.SetFinalValue(value)
+		f.finishedChannel <- state
 	}
 
 	return nil
@@ -325,4 +329,8 @@ func (f *FourRoundRBC) GetState(messageHash []byte) (*State, bool) {
 	defer f.RUnlock()
 	state, ok := f.states[string(messageHash)]
 	return state, ok
+}
+
+func (f *FourRoundRBC) GetFinishChannel() <-chan *State {
+	return f.finishedChannel
 }

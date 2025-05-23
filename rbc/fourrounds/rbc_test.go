@@ -562,6 +562,8 @@ func runBroadcast(ctx context.Context, t require.TestingT, nodes []*TestNode, ms
 	onClose error, expectSuccess bool) {
 	startNodes(ctx, t, nodes, onClose)
 
+	wg := waitForResult(ctx, t, nodes, hash, expectSuccess)
+
 	// Start RBC
 	dealer := nodes[0]
 	err := dealer.rbc.RBroadcast(msg)
@@ -571,7 +573,6 @@ func runBroadcast(ctx context.Context, t require.TestingT, nodes []*TestNode, ms
 	time.Sleep(1 * time.Second)
 
 	// Wait for all instances to finish
-	wg := waitForResult(t, nodes, hash, expectSuccess)
 	wg.Wait()
 }
 
@@ -797,13 +798,14 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 	out, err := proto.Marshal(inst)
 	require.NoError(t, err)
 
+	nodesAlive := nodes[1:]
+	wg := waitForResult(ctx, t, nodesAlive, hash, true)
+
 	// Broadcast the initial PROPOSE message to start RBC
 	err = dyingDealer.Broadcast(out)
 	require.NoError(t, err)
 	t.Log("Broadcast complete")
 
-	nodesAlive := nodes[1:]
-	wg := waitForResult(t, nodesAlive, hash, true)
 	wg.Wait()
 
 	// Check that everything worked
@@ -855,12 +857,12 @@ func runWithDyingListeners(t *testing.T, threshold, nbDying int) {
 	failingCtx, failingCancel := context.WithCancel(context.Background())
 	startNodes(failingCtx, t, dyingNodes, context.Canceled)
 
+	wg := waitForResult(ctx, t, nodesAlive, hash, true)
+	wgDead := waitForResult(failingCtx, t, dyingNodes, hash, false)
+
 	// Start RBC from the second node
 	err = dealer.rbc.RBroadcast(message)
 	require.NoError(t, err)
-
-	wg := waitForResult(t, nodesAlive, hash, true)
-	wgDead := waitForResult(t, dyingNodes, hash, false)
 
 	// Stop the failing nodes
 	time.Sleep(time.Millisecond * 30)

@@ -48,18 +48,6 @@ func defaultPredicate([]byte) bool {
 	return true
 }
 
-func createTestNodeWithDelay(network *networking.FakeNetwork, threshold, nbNodes,
-	mLen int, delay time.Duration) *TestNode {
-	nIface, err := network.JoinNetwork()
-	if err != nil {
-		panic(err)
-	}
-	network.DelayNode(nIface.GetID(), delay)
-	rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
-	return node
-}
-
 func createDefaultNetworkTestNode(network networking.Network, mLen int) *TestNode {
 	threshold := 2
 	nbNodes := 3*threshold + 1
@@ -570,7 +558,8 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 // runBroadcast takes the node at index 0 from the given list of nodes and tells it to start RBC with the given
 // message msg. All other nodes are set to listen. The method returns when the algorithm finished
 // for all nodes
-func runBroadcast(ctx context.Context, t require.TestingT, nodes []*TestNode, msg, hash []byte, onClose error, expectSuccess bool) {
+func runBroadcast(ctx context.Context, t require.TestingT, nodes []*TestNode, msg, hash []byte,
+	onClose error, expectSuccess bool) {
 	startNodes(ctx, t, nodes, onClose)
 
 	// Start RBC

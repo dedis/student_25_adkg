@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"student_25_adkg/networking"
 	"student_25_adkg/reedsolomon"
 	"student_25_adkg/transport/udp"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,9 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createNetwork(threshold int) ([]*TestNode, error) {
-	network := networking.NewTransportNetwork(udp.NewUDP())
-
+func createNetwork(network networking.Network, threshold int) ([]*TestNode, error) {
 	nbNodes := 3*threshold + 1
 
 	// Set up the nodes
@@ -37,69 +37,97 @@ func createNetwork(threshold int) ([]*TestNode, error) {
 	return nodes, nil
 }
 
-func startNodes(ctx context.Context, log func(string, ...any), nodes []*TestNode) *sync.WaitGroup {
-	// Create a wait group to wait for all bracha instances to finish
-	wg := sync.WaitGroup{}
+func startNodes(ctx context.Context, t require.TestingT, nodes []*TestNode, expectedErr error) {
+	for _, node := range nodes {
+		go func() {
+			err := node.rbc.Listen(ctx)
+			require.ErrorIs(t, err, expectedErr)
+		}()
+	}
+}
+
+func getState(node *TestNode, messageHash []byte, tryDuration time.Duration) (*State, bool) {
+	var state *State
+	timer := time.NewTimer(tryDuration)
+	found := false
+	finished := false
+	for !finished {
+		select {
+		case <-timer.C:
+			found = false
+			finished = true
+			break
+		default:
+			s, ok := node.rbc.GetState(messageHash)
+			if ok {
+				state = s
+				found = true
+				finished = true
+				break
+			}
+		}
+	}
+	timer.Stop()
+	return state, found
+}
+
+func waitForResult(t require.TestingT, nodes []*TestNode, messageHash []byte, expectSuccess bool) *sync.WaitGroup {
+	wg := &sync.WaitGroup{}
+	var counter atomic.Int64
+	// Allow retrying to get the instance
+	waitInstanceTimeout := 1 * time.Second
 	for _, node := range nodes {
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
-			err := node.rbc.Listen(ctx)
-			if err != nil {
-				// Log
-				log("Error listening: %v", err)
+
+			// Try to get the state for some time to allow some delay in the network
+			state, found := getState(node, messageHash, waitInstanceTimeout)
+
+			if !found {
+				// If the state could not be found, then we require that it was not expected
+				// to succeed in order to pass the test
+				require.False(t, expectSuccess, "state not found")
+				wg.Done()
+				return
 			}
+
+			// Wait for the state to finish
+			<-state.GetFinishedChan()
+
+			require.Equal(t, expectSuccess, state.Success())
+			counter.Add(1)
+			fmt.Printf("Node %d done (%d/%d)\n", node.GetID(), counter.Load(), len(nodes))
+			wg.Done()
 		}()
 	}
-	return &wg
-}
 
-func runWithParameters(ctx context.Context, t *testing.B, threshold int,
-	message []byte) (time.Duration, int) {
-	// Config
-	nodes, err := createNetwork(threshold)
-	require.NoError(t, err)
-
-	// Start all nodes but the dealer (idx 0)
-	wg := startNodes(ctx, t.Logf, nodes[1:])
-
-	dealer := nodes[0]
-
-	// Run RBC and check the result
-	start := time.Now()
-	// Start RBC
-	err = dealer.rbc.RBroadcast(ctx, message)
-	require.NoError(t, err)
-	t.Log("Broadcast complete")
-
-	wg.Wait()
-	end := time.Now()
-	elapsed := end.Sub(start)
-
-	received := len(nodes[0].GetReceived())
-	return elapsed, received
+	return wg
 }
 
 func Benchmark_Threshold20(b *testing.B) {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	threshold := 20
 
-	message := generateMessage(threshold + 1)
+	message, hash := generateMessage(threshold + 1)
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		nodes, err := createNetwork(threshold)
+		network := networking.NewTransportNetwork(udp.NewUDP())
+		nodes, err := createNetwork(network, threshold)
 		require.NoError(b, err)
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		// Should finish within 5 seconds
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
 		// Start the nodes
-		wg := startNodes(ctx, b.Logf, nodes[1:])
+		startNodes(ctx, b, nodes[1:], context.Canceled)
 
 		dealer := nodes[0]
 
 		// Start RBC
-		err = dealer.rbc.RBroadcast(ctx, message)
+		err = dealer.rbc.RBroadcast(message)
 		require.NoError(b, err)
+
+		wg := waitForResult(b, nodes, hash, true)
 
 		wg.Wait()
 		cancel()
@@ -108,13 +136,13 @@ func Benchmark_Threshold20(b *testing.B) {
 	b.ReportAllocs()
 }
 
-func BenchmarkRBC_TimingsMessages(t *testing.B) {
-	t.Skip("Skipping this test by default. Run explicitly if needed.")
+func BenchmarkRBC_TimingsMessages(b *testing.B) {
+	b.Skip("Skipping this test by default. Run explicitly if needed.")
 	minThreshold := 2
 	maxThreshold := 30
 
 	messageLength := 2
-	message := generateMessage(messageLength)
+	message, messageHash := generateMessage(messageLength)
 
 	size := maxThreshold - minThreshold + 1
 	thresholds := make([]int, size)
@@ -124,7 +152,13 @@ func BenchmarkRBC_TimingsMessages(t *testing.B) {
 	idx := 0
 	for threshold := minThreshold; threshold <= maxThreshold; threshold++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		duration, messagesCount := runWithParameters(ctx, t, threshold, message)
+		network := networking.NewTransportNetwork(udp.NewUDP())
+		nodes, err := createNetwork(network, threshold)
+		require.NoError(b, err)
+
+		start := time.Now()
+		runBroadcast(ctx, b, nodes, message, messageHash, context.Canceled, true)
+		end := time.Now()
 
 		cancel()
 
@@ -133,8 +167,8 @@ func BenchmarkRBC_TimingsMessages(t *testing.B) {
 		}
 
 		thresholds[idx] = threshold
-		durations[idx] = duration
-		messagesCounts[idx] = messagesCount
+		durations[idx] = end.Sub(start)
+		messagesCounts[idx] = len(nodes[0].GetReceived())
 		idx++
 	}
 

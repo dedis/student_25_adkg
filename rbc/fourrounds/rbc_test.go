@@ -9,8 +9,6 @@ import (
 	"student_25_adkg/rbc/fourrounds/typedefs"
 	"student_25_adkg/reedsolomon"
 	"student_25_adkg/transport/udp"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -74,13 +72,17 @@ func createDefaultNetworkTestNode(network networking.Network, mLen int) *TestNod
 	return node
 }
 
-func generateMessage(l int) []byte {
+// Generate a random message of the given size and return its hash along
+func generateMessage(l int) ([]byte, []byte) {
 	r := rand.New(rand.NewSource(99))
 	s := make([]byte, l)
 	for i := 0; i < l; i++ {
 		s[i] = byte(r.Intn(256))
 	}
-	return s
+	hash := sha256.New()
+	hash.Write(s)
+	hashed := hash.Sum(nil)
+	return s, hashed
 }
 
 /****************************************************************************************/
@@ -95,7 +97,7 @@ func TestFourRoundsRBC_FreshHash(t *testing.T) {
 
 	// Randomly generate a message to hash
 	mLen := 3 // Length of the messages being sent
-	s := generateMessage(mLen)
+	s, _ := generateMessage(mLen)
 
 	node := createDefaultNetworkTestNode(network, mLen)
 
@@ -117,58 +119,47 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 
 	// Config
 	threshold := 2
-	nbNodes := 3*threshold + 1
-	mLen := threshold + 1 // Length of the messages being sent
+	nbNodes := threshold*3 + 1
 
 	// Set up a node to test
-	node := createDefaultNetworkTestNode(network, mLen)
+	node := createDefaultNetworkTestNode(network, threshold+1)
 	go func() {
 		err := node.rbc.Listen(ctx)
-		require.Error(t, context.Canceled, err)
+		// Should stop listening because the context was cancelled
+		require.ErrorIs(t, err, context.Canceled)
 	}()
 
-	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
-	// want to see what these interfaces receive from the real node
-	interfaces := make([]*networking.FakeInterface, nbNodes-1)
-	for i := 0; i < nbNodes-1; i++ {
-		iface, err := network.JoinNetwork()
-		require.NoError(t, err)
-		casted, ok := iface.(*networking.FakeInterface)
-		require.True(t, ok)
-		interfaces[i] = casted
-		startDummyNode(ctx, casted)
-	}
+	// Connect a "fake" node i.e. get the  interface without creating a test node since we just
+	// want to see what it receives from the real node
+	iface, err := network.JoinNetwork()
+	require.NoError(t, err)
+	startDummyNode(ctx, iface)
 
 	// Send a PROPOSE message to the test node and check that it answers correctly
-	s := generateMessage(mLen)
-	sHash, err := node.rbc.FreshHash(s)
-	require.NoError(t, err)
-	proposeMessage := createProposeMessage(s)
+	message, hash := generateMessage(threshold + 1)
+	proposeMessage := createProposeMessage(message)
 	proposeBytes, err := proto.Marshal(proposeMessage)
 	require.NoError(t, err)
 
-	err = interfaces[1].Send(proposeBytes, node.GetID())
+	err = iface.Send(proposeBytes, node.GetID())
 	require.NoError(t, err)
 
 	// Wait a second for message to have been sent
 	time.Sleep(100 * time.Millisecond)
 
-	// Expect each interface to have received one ECHO message from the node
-	for _, iface := range interfaces {
-		received := iface.GetReceived()
+	received := iface.GetReceived()
 
-		// Should have received the ECHO message from the node
-		require.Equal(t, 1, len(received))
+	// Should have received one ECHO message from the node
+	require.Equal(t, 1, len(received))
 
-		// Check that the message received is an ECHO and that the hash matches
-		bs := received[0]
-		msg := &typedefs.Instruction{}
-		err = proto.Unmarshal(bs, msg)
-		require.NoError(t, err)
-		echoMessage, ok := msg.GetOperation().GetOp().(*typedefs.Message_EchoInst)
-		require.True(t, ok)
-		require.True(t, bytes.Equal(echoMessage.EchoInst.GetMessageHash(), sHash))
-	}
+	// Check that the message received is an ECHO and that the hash matches
+	instruction := &typedefs.Instruction{}
+	err = proto.Unmarshal(received[0], instruction)
+	require.NoError(t, err)
+	echoMessage, ok := instruction.GetOperation().GetOp().(*typedefs.Message_EchoInst)
+	require.True(t, ok)
+	messageHash := echoMessage.EchoInst.GetMessageHash()
+	require.True(t, bytes.Equal(messageHash, hash))
 
 	// Check the messages sent and received by the real node
 	nSent := node.GetSent()
@@ -180,15 +171,11 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	// Node should have received the PROPOSE message and its own ECHO broadcast
 	require.Equal(t, 2, len(nReceived))
 
-	// Try to reconstruct from the ECHO message
-	messages := interfaces[0].GetReceived()
-	bs := messages[0]
-	msg := &typedefs.Instruction{}
-	err = proto.Unmarshal(bs, msg)
-	require.NoError(t, err)
-	echoMessage, ok := msg.GetOperation().GetOp().(*typedefs.Message_EchoInst)
+	// Node should have a stored a new instance with the corresponding hash
+	_, ok = node.rbc.GetState(hash)
 	require.True(t, ok)
 
+	// Try to reconstruct from the ECHO message
 	// The ECHO message should have a share for each node
 	require.Equal(t, nbNodes, len(echoMessage.EchoInst.GetEncodingShares()))
 
@@ -199,16 +186,15 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 			Idx: index,
 			Val: echoMessage.EchoInst.GetEncodingShares()[i],
 		}
-
 	}
 
 	require.Equal(t, nbNodes, len(chunks))
 	decoded, err := node.rbc.rs.Decode(chunks)
 	require.NoError(t, err)
 
-	require.Equal(t, len(s), len(decoded))
+	require.Equal(t, len(message), len(decoded))
 	// Check that the bytes of the decoded message match the original message sent
-	require.True(t, bytes.Equal(s, decoded))
+	require.True(t, bytes.Equal(message, decoded))
 
 	// Stop all listening networks
 	cancel()
@@ -219,41 +205,35 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 // then a READY is sent only once
 func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	// Set up a fake network
-	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
+	network := networking.NewFakeNetwork()
 
 	// Config
 	threshold := 2
-	nbNodes := 3*threshold + 1
 
 	// Set up a node to test
-	node := createDefaultNetworkTestNode(network, 4)
+	node := createDefaultNetworkTestNode(network, threshold+1)
 	go func() {
 		err := node.rbc.Listen(ctx)
-		require.Error(t, context.Canceled, err)
+		// Should have stopped listening because the context was cancelled
+		require.ErrorIs(t, err, context.Canceled)
 	}()
 
 	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
 	// want to see what these interfaces receive from the real node
-	interfaces := make([]*networking.FakeInterface, nbNodes-1)
-	for i := 0; i < nbNodes-1; i++ {
-		iface, err := network.JoinNetwork()
-		require.NoError(t, err)
-		casted, ok := iface.(*networking.FakeInterface)
-		require.True(t, ok)
-		interfaces[i] = casted
-		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, casted)
-	}
+	networkInterface, err := network.JoinNetwork()
+	require.NoError(t, err)
+	// Start the interface to just receive messages and do nothing with them
+	startDummyNode(ctx, networkInterface)
 
-	fakeShare := []*reedsolomon.Encoding{
+	fakeShares := []*reedsolomon.Encoding{
 		{
 			Idx: node.rbc.nodeID,
 			Val: []byte{1, 2, 3, 4},
 		},
 	}
 	hash := []byte{5, 6, 7, 8}
-	echoMsg := createEchoMessage(fakeShare, hash)
+	echoMsg := createEchoMessage(fakeShares, hash)
 	echoBytes, err := proto.Marshal(echoMsg)
 	require.NoError(t, err)
 
@@ -261,10 +241,10 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	sent := 0
 	for i := 0; i < echoThreshold-1; i++ {
 		// Send the ECHO message to the real node
-		err := interfaces[0].Send(echoBytes, node.GetID())
+		err := networkInterface.Send(echoBytes, node.GetID())
 		require.NoError(t, err)
 		sent++
-		// Wait a few milliseconds to make sure the node received and processed the message
+		// Wait to make sure the node received and processed the message
 		time.Sleep(10 * time.Millisecond)
 
 		nReceived := node.GetReceived()
@@ -277,11 +257,12 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Sent another echo and expect a ready message to be broadcast
-	err = interfaces[0].Send(echoBytes, node.GetID())
+	// Send another ECHO message and expect a READY message to be broadcast
+	err = networkInterface.Send(echoBytes, node.GetID())
 	require.NoError(t, err)
 	sent++
-	// Wait sometime to leave time for the node to have sent all its messages
+
+	// Wait to leave time for the node to have sent its messages
 	time.Sleep(10 * time.Millisecond)
 
 	nReceived := node.GetReceived()
@@ -292,14 +273,12 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	// Should have sent a READY broadcast
 	require.Equal(t, 1, len(nSent))
 
-	// All other interfaces should have received one
-	for _, iface := range interfaces {
-		received := iface.GetReceived()
-		require.Equal(t, 1, len(received))
-	}
+	// The interface should have received the READY broadcast of the node
+	received := networkInterface.GetReceived()
+	require.Equal(t, 1, len(received))
 
 	// Send another ECHO and check that no other message is sent by the node
-	err = interfaces[0].Send(echoBytes, node.GetID())
+	err = networkInterface.Send(echoBytes, node.GetID())
 	require.NoError(t, err)
 	sent++
 
@@ -309,13 +288,11 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	require.Equal(t, sent+1, len(nReceived))
 
 	nSent = node.GetSent()
-	// Should only have sent a single ECHO message
+	// The node should not have sent another READY message
 	require.Equal(t, 1, len(nSent))
-	for _, iface := range interfaces {
-		received := iface.GetReceived()
-		// Should only have received one ECHO from the node
-		require.Equal(t, 1, len(received))
-	}
+	received = networkInterface.GetReceived()
+	// Should only have received one READY message from the node
+	require.Equal(t, 1, len(received))
 
 	// Stop all
 	cancel()
@@ -335,24 +312,19 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	nbNodes := 3*threshold + 1
 
 	// Set up a node to test
-	node := createDefaultNetworkTestNode(network, 4)
+	node := createDefaultNetworkTestNode(network, threshold+1)
 	go func() {
 		err := node.rbc.Listen(ctx)
-		require.Error(t, context.Canceled, err)
+		// Should have stopped listening because the context was cancelled
+		require.ErrorIs(t, err, context.Canceled)
 	}()
 
-	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
-	// want to see what these interfaces receive from the real node
-	interfaces := make([]*networking.FakeInterface, nbNodes-1)
-	for i := 0; i < nbNodes-1; i++ {
-		iface, err := network.JoinNetwork()
-		require.NoError(t, err)
-		casted, ok := iface.(*networking.FakeInterface)
-		require.True(t, ok)
-		interfaces[i] = casted
-		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, casted)
-	}
+	// Connect "fake" node i.e. get an interface without creating a test node since we just
+	// want to see what the interface receive from the real node
+	iface, err := network.JoinNetwork()
+	require.NoError(t, err)
+	// Start the interface to just receive messages and do nothing with them
+	startDummyNode(ctx, iface)
 
 	fakeShares := make([]*reedsolomon.Encoding, nbNodes)
 	for i := 0; i < nbNodes; i++ {
@@ -376,7 +348,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 		readyMsg := createReadyMessage(fakeShares[sharedIdx].Val, hash, fakeShares[0].Idx)
 		readyBytes, err := proto.Marshal(readyMsg)
 		require.NoError(t, err)
-		err = interfaces[0].Send(readyBytes, node.GetID())
+		err = iface.Send(readyBytes, node.GetID())
 		require.NoError(t, err)
 		sent++
 
@@ -397,7 +369,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	readyMsg := createReadyMessage(fakeShares[sharedIdx].Val, hash, fakeShares[0].Idx)
 	readyBytes, err := proto.Marshal(readyMsg)
 	require.NoError(t, err)
-	err = interfaces[0].Send(readyBytes, node.GetID())
+	err = iface.Send(readyBytes, node.GetID())
 	require.NoError(t, err)
 	sent++
 
@@ -409,11 +381,9 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	nSent := node.GetSent()
 	require.Equal(t, 0, len(nSent))
 
-	for _, iface := range interfaces {
-		received := iface.GetReceived()
-		// Should not have received anything yet
-		require.Equal(t, 0, len(received))
-	}
+	received := iface.GetReceived()
+	// Should not have received anything yet
+	require.Equal(t, 0, len(received))
 
 	// Send t ECHO messages for the node and nothing should happen
 	echoMsg := createEchoMessage(fakeShares, hash)
@@ -422,7 +392,7 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 
 	echoThreshold := threshold + 1
 	for i := 0; i < echoThreshold-1; i++ {
-		err := interfaces[0].Send(echoBytes, node.GetID())
+		err := iface.Send(echoBytes, node.GetID())
 		require.NoError(t, err)
 		sent++
 
@@ -437,10 +407,10 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 		require.Equal(t, 0, len(nSent))
 	}
 
-	// Sent t+1 and t+2 ECHO and the node should have sent one READY message
-	err = interfaces[0].Send(echoBytes, node.GetID())
+	// Send t+1 and t+2 ECHO and the node should have sent one READY message
+	err = iface.Send(echoBytes, node.GetID())
 	require.NoError(t, err)
-	err = interfaces[0].Send(echoBytes, node.GetID())
+	err = iface.Send(echoBytes, node.GetID())
 	require.NoError(t, err)
 	sent += 2
 
@@ -454,11 +424,9 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	// Should have sent a READY broadcast
 	require.Equal(t, 1, len(nSent))
 
-	for _, iface := range interfaces {
-		received := iface.GetReceived()
-		// Should have received a READY broadcast from the node
-		require.Equal(t, 1, len(received))
-	}
+	received = iface.GetReceived()
+	// Should have received a READY broadcast from the node
+	require.Equal(t, 1, len(received))
 
 	// Stop all
 	cancel()
@@ -476,24 +444,19 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	nbNodes := 3*threshold + 1
 
 	// Set up a node to test
-	node := createDefaultNetworkTestNode(network, 4)
+	node := createDefaultNetworkTestNode(network, threshold+1)
 	go func() {
 		err := node.rbc.Listen(ctx)
-		require.Error(t, context.Canceled, err)
+		// Start the interface to just receive messages and do nothing with them
+		require.ErrorIs(t, err, context.Canceled)
 	}()
 
-	// Connect "fake" nodes i.e. get their interface without creating a test node since we just
-	// want to see what these interfaces receive from the real node
-	interfaces := make([]*networking.FakeInterface, nbNodes-1)
-	for i := 0; i < nbNodes-1; i++ {
-		iface, err := network.JoinNetwork()
-		require.NoError(t, err)
-		casted, ok := iface.(*networking.FakeInterface)
-		require.True(t, ok)
-		interfaces[i] = casted
-		// Start the interface to just receive messages and do nothing with them
-		startDummyNode(ctx, casted)
-	}
+	// Connect "fake" node i.e. get an interface without creating a test node since we just
+	// want to see what the interface receives from the real node
+	iface, err := network.JoinNetwork()
+	require.NoError(t, err)
+	// Start the interface to just receive messages and do nothing with them
+	startDummyNode(ctx, iface)
 
 	// Create a fake shares
 	fakeShares := make([]*reedsolomon.Encoding, nbNodes)
@@ -520,7 +483,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	echoThreshold := threshold + 1
 	sent := 0
 	for i := 0; i < echoThreshold; i++ {
-		err := interfaces[0].Send(echoBytes, node.GetID())
+		err := iface.Send(echoBytes, node.GetID())
 		require.NoError(t, err)
 		sent++
 
@@ -541,7 +504,7 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 		readyMsg := createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
 		readyBytes, err := proto.Marshal(readyMsg)
 		require.NoError(t, err)
-		err = interfaces[0].Send(readyBytes, node.GetID())
+		err = iface.Send(readyBytes, node.GetID())
 		require.NoError(t, err)
 		sent++
 		shareIdx++
@@ -561,14 +524,14 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	readyMsg := createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
 	readyBytes, err := proto.Marshal(readyMsg)
 	require.NoError(t, err)
-	err = interfaces[0].Send(readyBytes, node.GetID())
+	err = iface.Send(readyBytes, node.GetID())
 	require.NoError(t, err)
 
 	shareIdx++
 	readyMsg = createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
 	readyBytes, err = proto.Marshal(readyMsg)
 	require.NoError(t, err)
-	err = interfaces[0].Send(readyBytes, node.GetID())
+	err = iface.Send(readyBytes, node.GetID())
 	require.NoError(t, err)
 	sent += 2
 
@@ -587,17 +550,14 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	_, ok := msg.Operation.Op.(*typedefs.Message_ReadyInst)
 	require.True(t, ok, "Message received should be a READY message")
 
-	for _, iface := range interfaces {
-		received := iface.GetReceived()
-		// Should all have received a ready message
-		require.Equal(t, 1, len(received))
-		msg := &typedefs.Instruction{}
-		err = proto.Unmarshal(received[0], msg)
-		require.NoError(t, err)
-		_, ok := msg.Operation.Op.(*typedefs.Message_ReadyInst)
-		require.True(t, ok, "Message received should be a READY")
-
-	}
+	received := iface.GetReceived()
+	// Should all have received a ready message
+	require.Equal(t, 1, len(received))
+	msg = &typedefs.Instruction{}
+	err = proto.Unmarshal(received[0], msg)
+	require.NoError(t, err)
+	_, ok = msg.Operation.Op.(*typedefs.Message_ReadyInst)
+	require.True(t, ok, "Message received should be a READY")
 
 	// Stop all
 	cancel()
@@ -610,55 +570,39 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 // runBroadcast takes the node at index 0 from the given list of nodes and tells it to start RBC with the given
 // message msg. All other nodes are set to listen. The method returns when the algorithm finished
 // for all nodes
-func runBroadcast(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
-	ctx, cancel := context.WithCancel(context.Background())
+func runBroadcast(ctx context.Context, t require.TestingT, nodes []*TestNode, msg, hash []byte, onClose error, expectSuccess bool) {
+	startNodes(ctx, t, nodes, onClose)
 
-	var finishedCount atomic.Int64
-
-	// Create a wait group to wait for all bracha instances to finish
-	wg := sync.WaitGroup{}
-	n1 := nodes[0]
-	for i := 1; i < nbNodes; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := nodes[i].rbc.Listen(ctx)
-			if err != nil {
-				// Log
-				t.Logf("Error listening: %v", err)
-			}
-			finishedCount.Add(1)
-			t.Logf("Node %d done, %d/%d nodes finished", i, finishedCount.Load(), nbNodes)
-
-		}()
-	}
 	// Start RBC
-	err := n1.rbc.RBroadcast(ctx, msg)
-	t.Log("Broadcast complete")
+	dealer := nodes[0]
+	err := dealer.rbc.RBroadcast(msg)
 	require.NoError(t, err)
-	finishedCount.Add(1)
 
+	// Wait enough time for the nodes to have received the PROPOSE message
+	time.Sleep(1 * time.Second)
+
+	// Wait for all instances to finish
+	wg := waitForResult(t, nodes, hash, expectSuccess)
 	wg.Wait()
-	cancel()
 }
 
 // checkRBCResult checks that the state of the given node reflect a successful completion of
 // an RBC algorithm given the reliably broadcast message msg. Doesn't return true of false but
 // makes the testing fail in case of a problem
-func checkRBCResult(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
-	for i := 0; i < nbNodes; i++ {
-		n := nodes[i]
-		val := n.rbc.GetFinalValue()
-		finished := n.rbc.finished
-		require.True(t, finished)
+func checkRBCResult(t *testing.T, nodes []*TestNode, msg, msgHash []byte) {
+	for _, node := range nodes {
+		state, ok := node.rbc.GetState(msgHash)
+		require.True(t, ok)
+		require.True(t, state.Finished())
+		val := state.FinalValue()
 		require.True(t, len(msg) == len(val))
 		require.True(t, bytes.Equal(msg, val))
 	}
 }
 
-func runAndCheckRBC(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
-	runBroadcast(t, nodes, nbNodes, msg)
-	checkRBCResult(t, nodes, nbNodes, msg)
+func runAndCheckRBC(ctx context.Context, t *testing.T, nodes []*TestNode, msg, msgHash []byte) {
+	runBroadcast(ctx, t, nodes, msg, msgHash, context.Canceled, true)
+	checkRBCResult(t, nodes, msg, msgHash)
 }
 
 // TestFourRoundsRBC_Simple creates a network with a threshold t=2 and n=3*t+1 nodes
@@ -666,138 +610,91 @@ func runAndCheckRBC(t *testing.T, nodes []*TestNode, nbNodes int, msg []byte) {
 // and verifies that everyone agreed on the same value.
 func TestFourRoundsRBC_Simple(t *testing.T) {
 	// Config
+	ctx, cancel := context.WithCancel(context.Background())
 	network := networking.NewFakeNetwork()
 
 	threshold := 2
-	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		nodes[i] = createDefaultNetworkTestNode(network, mLen)
-	}
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
 
 	// Run RBC and check the result
-	runAndCheckRBC(t, nodes, nbNodes, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
+}
+
+func setupWithDeadNodes(t *testing.T, threshold, nbDead int) []*TestNode {
+	// Config
+	network := networking.NewFakeNetwork()
+	nbNodes := 3*threshold + 1
+
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
+
+	nodesAlive := nodes[:nbNodes-nbDead]
+
+	return nodesAlive
 }
 
 // TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
 // Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
 // In this situation, 1 node is dead, and we expect the algorithm to finish for all nodes alive correctly.
 func TestFourRoundsRBC_OneDeadNode(t *testing.T) {
-	// Config
-	network := networking.NewFakeNetwork()
-
+	ctx, cancel := context.WithCancel(context.Background())
 	threshold := 2
-	nbNodes := 3*threshold + 1
 	nbDead := 1
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the working nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes-nbDead; i++ {
-		nodes[i] = createDefaultNetworkTestNode(network, mLen)
-	}
+	nodes := setupWithDeadNodes(t, threshold, nbDead)
 
-	// Set up the dead nodes
-	deadNodes := make([]networking.NetworkInterface, nbDead)
-	for i := 0; i < nbDead; i++ {
-		// Dead nodes just mean a node that joins the network but never receives or sends anything
-		// i.e. creating a stream but never using it
-		stream, err := network.JoinNetwork()
-		require.NoError(t, err)
-		deadNodes[i] = stream
-	}
-
-	// Run and check RBC
-	runAndCheckRBC(t, nodes, nbNodes-nbDead, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
 }
 
 // TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
 // Wait until the algorithm finishes for all nodes and verifies that everyone agreed on the same value.
 // In this situation, 2 nodes are dead, and we expect the algorithm to finish for all nodes alive correctly.
 func TestFourRoundsRBC_TwoDeadNode(t *testing.T) {
-	// Config
-	network := networking.NewFakeNetwork()
-
+	ctx, cancel := context.WithCancel(context.Background())
 	threshold := 2
-	nbNodes := 3*threshold + 1
 	nbDead := 2
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the working nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes-nbDead; i++ {
-		nodes[i] = createDefaultNetworkTestNode(network, mLen)
-	}
+	nodes := setupWithDeadNodes(t, threshold, nbDead)
 
-	// Set up the dead nodes
-	deadNodes := make([]networking.NetworkInterface, nbDead)
-	for i := 0; i < nbDead; i++ {
-		// Dead nodes just mean a node that joins the network but never receives or sends anything
-		// i.e. creating a stream but never using it
-		stream, err := network.JoinNetwork()
-		require.NoError(t, err)
-		deadNodes[i] = stream
-	}
-
-	// Run and check RBC
-	runAndCheckRBC(t, nodes, nbNodes-nbDead, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
 }
 
 // TestFourRoundsRBCSimple creates a network with a threshold t=2 and n=3*t+1 nodes and start a broadcast from one node.
 // In this situation, 3 nodes are dead, and we expect the algorithm to never finish.
 func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
-	// Config
-	network := networking.NewFakeNetwork()
-
-	timeout := time.Second * 5 // Wait five seconds
+	timeout := time.Second * 5
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	threshold := 2
-	nbNodes := 3*threshold + 1
 	nbDead := 3
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the working nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes-nbDead; i++ {
-		nodes[i] = createDefaultNetworkTestNode(network, mLen)
-	}
-
-	// Set up the dead nodes
-	deadNodes := make([]networking.NetworkInterface, nbDead)
-	for i := 0; i < nbDead; i++ {
-		// Dead nodes just mean a node that joins the network but never receives or sends anything
-		// i.e. creating a stream but never using it
-		stream, err := network.JoinNetwork()
-		require.NoError(t, err)
-		deadNodes[i] = stream
-	}
+	nodes := setupWithDeadNodes(t, threshold, nbDead)
 
 	// Run RBC in a go routing and call cancel on the context when the method returns (i.e. when the algorithm ends)
-	go func() {
-		runBroadcast(t, nodes, nbNodes-nbDead, s)
-		cancel()
-	}()
+	runBroadcast(ctx, t, nodes, message, hash, context.DeadlineExceeded, false)
 
 	// Wait for the context
 	<-ctx.Done()
 
 	// Require the deadline to have exceeded
-	require.Equal(t, ctx.Err(), context.DeadlineExceeded)
+	require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+	cancel()
 }
 
 // TestFourRoundsRBC_SlowNode creates a network with a threshold t=2 and n=3*t+1
@@ -806,31 +703,24 @@ func TestFourRoundsRBC_ThreeDeadNode(t *testing.T) {
 // should still work fine, only slowly.
 func TestFourRoundsRBC_SlowNode(t *testing.T) {
 	// Config
+	ctx, cancel := context.WithCancel(context.Background())
 	network := networking.NewFakeNetwork()
 
 	threshold := 2
-	nbNodes := 3*threshold + 1
-	nbSlow := 1
+	delay := 500 * time.Millisecond
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		if i >= nbNodes-nbSlow {
-			// Set up the slow nodes with half a second of delay when sending packets
-			delay := time.Millisecond * 500
-			nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
-		} else {
-			// All other nodes don't have delay
-			nodes[i] = createDefaultNetworkTestNode(network, mLen)
-		}
-	}
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
+
+	// Add delay to the first node
+	network.DelayNode(nodes[0].GetID(), delay)
 
 	// Run and check RBC, it should work normally only slower
-	runAndCheckRBC(t, nodes, nbNodes, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
 }
 
 // TestFourRoundsRBC_SlowNodes creates a network with a threshold t=2 and n=3*t+1
@@ -839,55 +729,54 @@ func TestFourRoundsRBC_SlowNode(t *testing.T) {
 // should still work fine, only slowly.
 func TestFourRoundsRBC_SlowNodes(t *testing.T) {
 	// Config
+	ctx, cancel := context.WithCancel(context.Background())
 	network := networking.NewFakeNetwork()
 
 	threshold := 2
-	nbNodes := 3*threshold + 1
 	nbSlow := 3
-
+	delay := 500 * time.Millisecond
 	// Randomly generate the value to broadcast
 	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(mLen)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		if i > nbNodes-nbSlow {
-			delay := time.Millisecond * 500
-			nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
-		} else {
-			// All other nodes don't have delay
-			nodes[i] = createDefaultNetworkTestNode(network, mLen)
-		}
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
+
+	// Add delay to first three nodes
+	for i := 0; i < nbSlow; i++ {
+		network.DelayNode(nodes[i].GetID(), delay)
 	}
 
 	// Run and check RBC, it should work normally only slower
-	runAndCheckRBC(t, nodes, nbNodes, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
 }
 
 // TestFourRoundsRBC_SlowNodesStress create a network where all nodes
-// are slow in their communication. Except the protocol to finish normally
+// are slow in their communication. Expect the protocol to finish normally
 // albeit slower
 func TestFourRoundsRBC_SlowNodesStress(t *testing.T) {
 	// Config
+	ctx, cancel := context.WithCancel(context.Background())
 	network := networking.NewFakeNetwork()
 
 	threshold := 4
-	nbNodes := 3*threshold + 1
 	delay := time.Millisecond * 200
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
+
+	// Delay all nodes
+	for _, node := range nodes {
+		network.DelayNode(node.GetID(), delay)
 	}
 
 	// Run and check RBC, it should work normally only slower
-	runAndCheckRBC(t, nodes, nbNodes, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
 }
 
 // TestFourRoundsRBC_DealAndDies creates a network with a threshold t=2 and n=3*t+1
@@ -899,41 +788,23 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	threshold := 2
-	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		nodes[i] = createDefaultNetworkTestNode(network, mLen)
-	}
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
 
-	// Set all nodes to listen except from one which will be the dead one
-	// Create a wait group to wait for all instances to finish
-	wg := sync.WaitGroup{}
-	for i := 0; i < nbNodes-1; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := nodes[i].rbc.Listen(ctx)
-			if err != nil {
-				// Log
-				t.Logf("Error listening: %v", err)
-			}
-			t.Logf("Node %d done", i)
-		}()
-	}
+	// Start all nodes expect the first who will deal and die
+	startNodes(ctx, t, nodes[1:], context.Canceled)
 
 	// Create a dying dealer. We don't need to actually create an RBC instance, we just need to send the PROPOSE
 	// from some node in the network and never answer after that
-	dyingDealer, err := network.JoinNetwork()
+	dyingDealer := nodes[0].NetworkInterface
 	require.NoError(t, err)
 
 	// Start RBC from the dying dealer
-	inst := createProposeMessage(s)
+	inst := createProposeMessage(message)
 	out, err := proto.Marshal(inst)
 	require.NoError(t, err)
 
@@ -942,265 +813,93 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 	require.NoError(t, err)
 	t.Log("Broadcast complete")
 
+	nodesAlive := nodes[1:]
+	wg := waitForResult(t, nodesAlive, hash, true)
 	wg.Wait()
 
 	// Check that everything worked
-	checkRBCResult(t, nodes, nbNodes-1, s)
+	checkRBCResult(t, nodesAlive, message, hash)
 	cancel()
 }
 
-// TestFourRoundsRBC_testStop tests that calling the Stop method on a node after having called the broadcast
-// or listen function returns without error
-func TestFourRoundsRBC_testStop(t *testing.T) {
+// TestFourRoundsRBC_CancelContext tests that cancelling the context stops the nodes
+// after they have been started
+func TestFourRoundsRBC_CancelContext(t *testing.T) {
 	network := networking.NewFakeNetwork()
+	threshold := 2
 
-	// Randomly generate the value to broadcast
-	mLen := 3 // Arbitrary message length
-	s := generateMessage(mLen)
-
-	node := createDefaultNetworkTestNode(network, mLen)
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
 
 	// Listen on the node in a go routine and expect it to cancel the context before the timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
-
-	go func() {
-		err := node.rbc.Listen(ctx)
-		// Listen should have returned an ErrClosed since the stop function should have been called
-		require.Error(t, context.Canceled, err)
-		// If this is reached, the Listen method is returned so cancel the ctx to notify
-	}()
-	cancel()
-
-	<-ctx.Done()
-	require.Equal(t, context.Canceled, ctx.Err())
-
-	// Similarly but with broadcast
-
-	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second*1)
-
-	go func() {
-		err := node.rbc.RBroadcast(ctx2, s)
-		// Listen should have returned an ErrClosed since the stop function should have been called
-		require.Error(t, context.Canceled, err)
-		// If this is reached, the Listen method is returned so cancel the ctx to notify
-	}()
-	cancel2()
-
-	<-ctx2.Done()
-	require.Equal(t, context.Canceled, ctx2.Err())
-}
-
-// TestFourRoundsRBC_DealAndStop works similarly to TestFourRoundsRBC_DealAndDies but instead the Stop function
-// is called on the dealer
-func TestFourRoundsRBC_DealAndStop(t *testing.T) {
-	// Config
-	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	threshold := 2
-	nbNodes := 3*threshold + 1
+	startNodes(ctx, t, nodes, context.Canceled)
 
-	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
-
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		// Add a bit of delay when reading to leave time for the dealer node to be stopped
-		delay := time.Millisecond * 10
-		nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
-	}
-
-	// Set all nodes to listen except from one which will be the dealer
-	wg := sync.WaitGroup{}
-	for i := 0; i < nbNodes-1; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := nodes[i].rbc.Listen(ctx)
-			if err != nil {
-				// Log
-				t.Logf("Error listening: %v", err)
-			}
-			t.Logf("Node %d done", i)
-		}()
-	}
-
-	dealer := nodes[nbNodes-1]
-
-	dealerCtx, dealerCancel := context.WithCancel(context.Background())
-	go func() {
-		// Start RBC from the dealer
-		err := dealer.rbc.RBroadcast(dealerCtx, s)
-		require.Error(t, context.Canceled, err)
-		t.Log("Broadcast complete")
-
-	}()
-
-	// Stop the dealer
-	time.Sleep(time.Millisecond * 10)
-	dealerCancel()
-	t.Log("Dealer Stopped")
-
-	wg.Wait()
-
-	// Check that everything worked
-	checkRBCResult(t, nodes, nbNodes-1, s)
-
-	// Check the dealer did not finish
-	require.False(t, dealer.rbc.finished)
 	cancel()
 }
 
-// TestFourRoundsRBC_ListenerDies works similarly to TestFourRoundsRBC_DealAndStop but instead a random node is
-// stopped and not the dealer
-func TestFourRoundsRBC_ListenerDies(t *testing.T) {
+func runWithDyingListeners(t *testing.T, threshold, nbDying int) {
 	// Config
 	network := networking.NewFakeNetwork()
 	ctx, cancel := context.WithCancel(context.Background())
-
-	threshold := 2
-	nbNodes := 3*threshold + 1
+	delay := time.Millisecond * 100
 
 	// Randomly generate the value to broadcast
 	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(mLen)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		// Add a bit of delay when reading to leave time for the dealer node to be stopped
-		delay := time.Millisecond * 10
-		nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
+
+	// Add a bit of delay to all nodes to make sure we have enough time to stop the node
+	for _, node := range nodes {
+		network.DelayNode(node.GetID(), delay)
 	}
 
-	// Set all nodes to listen except from one which will be the dealer and the one that will fail
-	wg := sync.WaitGroup{}
-	for i := 1; i < nbNodes-1; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := nodes[i].rbc.Listen(ctx)
-			if err != nil {
-				// Log
-				t.Logf("Error listening: %v", err)
-			}
-			t.Logf("Node %d done", i)
-		}()
-	}
+	dyingNodes := nodes[:nbDying]
+	dealer := nodes[nbDying]
+	nodesAlive := nodes[nbDying:]
 
-	// Start the failing node
+	// Start all nodes expect the first who will have its own context to be cancelled
+	startNodes(ctx, t, nodesAlive, context.Canceled)
 	failingCtx, failingCancel := context.WithCancel(context.Background())
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		failNode := nodes[nbNodes-1]
-		err := failNode.rbc.Listen(failingCtx)
-		require.Error(t, context.Canceled, err)
-		t.Log("Failing node finished")
-	}()
+	startNodes(failingCtx, t, dyingNodes, context.Canceled)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// Start RBC from the dealer
-		err := nodes[0].rbc.RBroadcast(ctx, s)
-		require.NoError(t, err)
-		t.Log("Broadcast complete")
-	}()
+	// Start RBC from the second node
+	err = dealer.rbc.RBroadcast(message)
+	require.NoError(t, err)
 
-	// Stop the failing node
+	wg := waitForResult(t, nodesAlive, hash, true)
+	wgDead := waitForResult(t, dyingNodes, hash, false)
+
+	// Stop the failing nodes
 	time.Sleep(time.Millisecond * 30)
 	failingCancel()
 
 	wg.Wait()
+	wgDead.Wait()
 
-	// Check that everything worked
-	checkRBCResult(t, nodes, nbNodes-1, s)
+	// Check that everything worked for all nodes alive
+	checkRBCResult(t, nodesAlive, message, hash)
 
 	// Check that the last node did not finish
-	require.False(t, nodes[nbNodes-1].rbc.finished)
+	for _, dyingNode := range dyingNodes {
+		require.Nil(t, dyingNode.rbc.GetFinalValue(hash))
+	}
 	cancel()
+}
+
+// TestFourRoundsRBC_ListenerDies works similarly to TestFourRoundsRBC_DealAndDies but instead a random node is
+// stopped and not the dealer
+func TestFourRoundsRBC_ListenerDies(t *testing.T) {
+	runWithDyingListeners(t, 2, 1)
 }
 
 // TestFourRoundsRBC_ListenerDies works similarly to TestFourRoundsRBC_DealAndStop but instead two random nodes are
 // stopped and not the dealer
 func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
-	// Config
-	network := networking.NewFakeNetwork()
-	ctx, cancel := context.WithCancel(context.Background())
-
-	threshold := 2
-	nbNodes := 3*threshold + 1
-	nbFailing := 2
-
-	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
-
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		// Add a bit of delay when reading to leave time for the dealer node to be stopped
-		delay := time.Millisecond * 10
-		nodes[i] = createTestNodeWithDelay(network, threshold, nbNodes, mLen, delay)
-	}
-
-	// Set all nodes to listen except from one which will be the dealer and the one that will fail
-	wg := sync.WaitGroup{}
-	for i := 1; i < nbNodes-nbFailing; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := nodes[i].rbc.Listen(ctx)
-			if err != nil {
-				// Log
-				t.Logf("Error listening: %v", err)
-			}
-			t.Logf("Node %d done", i)
-		}()
-	}
-
-	// Start the failing nodes
-	failingCtx, failingCancel := context.WithCancel(context.Background())
-	for i := 0; i < nbFailing; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			failNode := nodes[nbNodes-i-1]
-			err := failNode.rbc.Listen(failingCtx)
-			require.Error(t, context.Canceled, err)
-			t.Logf("Failing node %d finished", i)
-		}()
-	}
-
-	// Stat dealing
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// Start RBC from the dealer
-		err := nodes[0].rbc.RBroadcast(ctx, s)
-		require.NoError(t, err)
-		t.Log("Broadcast complete")
-	}()
-
-	// Wait  little bit
-	// Stop the failing nodes
-	time.Sleep(time.Millisecond * 20)
-	failingCancel()
-	t.Log("Failing node finished")
-
-	wg.Wait()
-
-	// Check that everything worked
-	checkRBCResult(t, nodes, nbNodes-nbFailing, s)
-
-	// Check that the last node did not finish
-	for i := 0; i < nbFailing; i++ {
-		require.False(t, nodes[nbNodes-i-1].rbc.finished)
-	}
-	cancel()
+	runWithDyingListeners(t, 2, 2)
 }
 
 // TestFourRoundsRBC_Stress creates a network with a threshold t=20 and n=3*t+1
@@ -1208,29 +907,20 @@ func TestFourRoundsRBC_TwoListenerDies(t *testing.T) {
 // for all nodes and verifies that everyone agreed on the same value.
 func TestFourRoundsRBC_Stress(t *testing.T) {
 	// Config
+	ctx, cancel := context.WithCancel(context.Background())
 	network := networking.NewFakeNetwork()
 
 	threshold := 20
-	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		// Create a custom node with a special sized buffer
-		iface, err := network.JoinWithBuffer(4000)
-		require.NoError(t, err)
-		rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-		node := NewTestNode(iface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, iface,
-			rs, iface.GetID()))
-		nodes[i] = node
-	}
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
 
 	// Run RBC and check the result
-	runAndCheckRBC(t, nodes, nbNodes, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
 }
 
 // TestFourRoundsRBC_RealNetwork creates a UDP network with a threshold t=2 and n=3*t+1 nodes
@@ -1238,23 +928,19 @@ func TestFourRoundsRBC_Stress(t *testing.T) {
 // and verifies that everyone agreed on the same value.
 func TestFourRoundsRBC_RealNetwork(t *testing.T) {
 	// Config
+	ctx, cancel := context.WithCancel(context.Background())
 	network := networking.NewTransportNetwork(udp.NewUDP())
-
 	threshold := 2
-	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
-	mLen := threshold + 1 // Arbitrary message length
-	s := generateMessage(mLen)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		nodes[i] = createDefaultNetworkTestNode(network, mLen)
-	}
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
 
 	// Run RBC and check the result
-	runAndCheckRBC(t, nodes, nbNodes, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
 }
 
 // TestFourRoundsRBC_RealNetworkStress creates a large UDP network with a threshold t=20 and n=3*t+1 nodes
@@ -1262,24 +948,17 @@ func TestFourRoundsRBC_RealNetwork(t *testing.T) {
 // and verifies that everyone agreed on the same value.
 func TestFourRoundsRBC_RealNetworkStress(t *testing.T) {
 	// Config
+	ctx, cancel := context.WithCancel(context.Background())
 	network := networking.NewTransportNetwork(udp.NewUDP())
-
 	threshold := 40
-	nbNodes := 3*threshold + 1
 
 	// Randomly generate the value to broadcast
-	s := generateMessage(threshold + 1)
+	message, hash := generateMessage(threshold + 1)
 
-	// Set up the nodes
-	nodes := make([]*TestNode, nbNodes)
-	for i := 0; i < nbNodes; i++ {
-		nIface, err := network.JoinNetwork()
-		require.NoError(t, err)
-		rs := reedsolomon.NewBWCodes(threshold+1, nbNodes)
-		node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
-		nodes[i] = node
-	}
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
 
 	// Run RBC and check the result
-	runAndCheckRBC(t, nodes, nbNodes, s)
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
 }

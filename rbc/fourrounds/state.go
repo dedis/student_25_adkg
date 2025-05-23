@@ -6,30 +6,28 @@ import (
 )
 
 type State struct {
-	sentReady        bool
-	echoCount        int
-	readyCount       int
-	readyShares      map[*reedsolomon.Encoding]struct{}
-	finalValue       []byte
-	finished         bool
-	success          bool
-	finishedChannels []chan struct{}
-	messageHash      []byte
+	sentReady   bool
+	echoCount   int
+	readyCount  int
+	readyShares map[*reedsolomon.Encoding]struct{}
+	finalValue  []byte
+	finished    bool
+	success     bool
+	messageHash []byte
 	sync.RWMutex
 }
 
 func NewState(messageHash []byte) *State {
 	return &State{
-		sentReady:        false,
-		echoCount:        0,
-		readyCount:       0,
-		readyShares:      make(map[*reedsolomon.Encoding]struct{}),
-		finalValue:       nil,
-		finished:         false,
-		success:          false,
-		finishedChannels: make([]chan struct{}, 0),
-		messageHash:      messageHash,
-		RWMutex:          sync.RWMutex{},
+		sentReady:   false,
+		echoCount:   0,
+		readyCount:  0,
+		readyShares: make(map[*reedsolomon.Encoding]struct{}),
+		finalValue:  nil,
+		finished:    false,
+		success:     false,
+		messageHash: messageHash,
+		RWMutex:     sync.RWMutex{},
 	}
 }
 
@@ -119,7 +117,6 @@ func (s *State) SetFinalValue(value []byte) {
 	s.finalValue = value
 	s.finished = true
 	s.success = true
-	s.notifyChannels()
 }
 
 func (s *State) SetFailedIfNotFinished() {
@@ -131,7 +128,6 @@ func (s *State) SetFailedIfNotFinished() {
 	s.finalValue = nil
 	s.finished = true
 	s.success = false
-	s.notifyChannels()
 }
 
 func (s *State) AddReadyShareIfAbsent(share *reedsolomon.Encoding) bool {
@@ -142,26 +138,4 @@ func (s *State) AddReadyShareIfAbsent(share *reedsolomon.Encoding) bool {
 	}
 	s.readyShares[share] = struct{}{}
 	return true
-}
-
-func (s *State) GetFinishedChan() <-chan struct{} {
-	s.Lock()
-	defer s.Unlock()
-	finishedChan := make(chan struct{})
-	if s.finished {
-		close(finishedChan)
-		// Don't store the closed channel
-		return finishedChan
-	}
-	// Return a closed channel if the protocol is already finished
-	s.finishedChannels = append(s.finishedChannels, finishedChan)
-	return finishedChan
-}
-
-func (s *State) notifyChannels() {
-	// Don't need to lock as it is a private method that will only be called by methods already locked
-	for _, ch := range s.finishedChannels {
-		close(ch)
-	}
-	s.finishedChannels = make([]chan struct{}, 0)
 }

@@ -1,6 +1,7 @@
 package fourrounds
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/csv"
@@ -69,29 +70,28 @@ func getState(node *TestNode, messageHash []byte, tryDuration time.Duration) (*S
 	return state, found
 }
 
-func waitForResult(t require.TestingT, nodes []*TestNode, messageHash []byte, expectSuccess bool) *sync.WaitGroup {
+func waitForResult(ctx context.Context, t require.TestingT, nodes []*TestNode, messageHash []byte, expectSuccess bool) *sync.WaitGroup {
 	wg := &sync.WaitGroup{}
 	// Allow retrying to get the instance
-	waitInstanceTimeout := 1 * time.Second
 	for _, node := range nodes {
 		wg.Add(1)
 		go func() {
-
-			// Try to get the state for some time to allow some delay in the network
-			state, found := getState(node, messageHash, waitInstanceTimeout)
-
-			if !found {
-				// If the state could not be found, then we require that it was not expected
-				// to succeed in order to pass the test
-				require.False(t, expectSuccess, "state not found")
-			} else {
-				// Wait for the state to finish
-				<-state.GetFinishedChan()
-
-				require.Equal(t, expectSuccess, state.Success())
+			for {
+				// Wait for the state
+				select {
+				case <-ctx.Done():
+					require.False(t, expectSuccess)
+					wg.Done()
+					return
+				case state, ok := <-node.rbc.GetFinishChannel():
+					require.True(t, ok)
+					if bytes.Equal(state.messageHash, messageHash) {
+						require.Equal(t, expectSuccess, state.Success())
+						wg.Done()
+						return
+					}
+				}
 			}
-
-			wg.Done()
 		}()
 	}
 
@@ -117,11 +117,10 @@ func Benchmark_Threshold20(b *testing.B) {
 
 		dealer := nodes[0]
 
+		wg := waitForResult(ctx, b, nodes, hash, true)
 		// Start RBC
 		err = dealer.rbc.RBroadcast(message)
 		require.NoError(b, err)
-
-		wg := waitForResult(b, nodes, hash, true)
 
 		wg.Wait()
 		cancel()

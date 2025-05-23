@@ -45,32 +45,8 @@ func startNodes(ctx context.Context, t require.TestingT, nodes []*TestNode, expe
 	}
 }
 
-func getState(node *TestNode, messageHash []byte, tryDuration time.Duration) (*State, bool) {
-	var state *State
-	timer := time.NewTimer(tryDuration)
-	found := false
-	finished := false
-	for !finished {
-		select {
-		case <-timer.C:
-			found = false
-			finished = true
-			break
-		default:
-			s, ok := node.rbc.GetState(messageHash)
-			if ok {
-				state = s
-				found = true
-				finished = true
-				break
-			}
-		}
-	}
-	timer.Stop()
-	return state, found
-}
-
-func waitForResult(ctx context.Context, t require.TestingT, nodes []*TestNode, messageHash []byte, expectSuccess bool) *sync.WaitGroup {
+func waitForResult(ctx context.Context, t require.TestingT, nodes []*TestNode,
+	messageHash []byte, expectSuccess bool) *sync.WaitGroup {
 	wg := &sync.WaitGroup{}
 	// Allow retrying to get the instance
 	for _, node := range nodes {

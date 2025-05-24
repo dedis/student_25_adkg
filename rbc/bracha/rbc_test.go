@@ -29,11 +29,38 @@ func defaultPredicate(bool) bool {
 	return true
 }
 
+func startNodes(ctx context.Context, t require.TestingT, nodes []*TestNode) {
+	for _, node := range nodes {
+		go func() {
+			err := node.rbc.Listen(ctx)
+			require.ErrorIs(t, err, context.Canceled)
+		}()
+	}
+}
+
+func waitForResult(ctx context.Context, t require.TestingT, nodes []*TestNode) *sync.WaitGroup {
+	wg := &sync.WaitGroup{}
+	for _, node := range nodes {
+		wg.Add(1)
+		go func() {
+			select {
+			case <-ctx.Done():
+				break
+			case <-node.rbc.GetFinishedChan():
+				require.True(t, node.rbc.state.Success())
+			}
+
+			wg.Done()
+		}()
+	}
+	return wg
+}
+
 func runRBCWithValue(t *testing.T, val bool) {
 	// Config
 	network := networking.NewFakeNetwork()
 	threshold := 1
-	nbNodes := 3
+	nbNodes := 3*threshold + 1
 
 	// Set up the nodes
 	nodes := make([]*TestNode, nbNodes)
@@ -46,33 +73,21 @@ func runRBCWithValue(t *testing.T, val bool) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create a wait group to wait for all bracha instances to finish
-	wg := sync.WaitGroup{}
-	n1 := nodes[0]
-	for i := 1; i < nbNodes; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := nodes[i].rbc.Listen(ctx)
-			if err != nil {
-				// Log
-				t.Logf("Error listening: %v", err)
-			}
-			t.Logf("Node %d done", i)
-		}()
-	}
+	startNodes(ctx, t, nodes)
+
+	wg := waitForResult(ctx, t, nodes)
+
 	// Start RBC
-	err := n1.rbc.RBroadcast(ctx, val)
+	dealer := nodes[0]
+	err := dealer.rbc.RBroadcast(val)
 	t.Log("Broadcast complete")
 	require.NoError(t, err)
 
 	wg.Wait()
 	// Check that all nodes settled on the same correct value and all finished
 	for _, n := range nodes {
-		actual := n.rbc.value
-		finished := n.rbc.finished
-		require.True(t, finished)
-		require.Equal(t, val, actual) // The value sent is True
+		require.True(t, n.rbc.state.Finished())
+		require.Equal(t, val, n.rbc.state.FinalValue()) // The value sent is True
 	}
 
 	cancel()

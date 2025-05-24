@@ -27,12 +27,10 @@ type AuthenticatedMessageStream interface {
 
 // RBC is an interface for an RBC protocol
 type RBC[T any] interface {
-	// RBroadcast blocks until the protocol is finished or an error occurred. The returned bool reflects this results
-	// If Stop is called, this method will return early without error.
-	RBroadcast(context.Context, T) error
-	// Listen expects to receive a PROPOSE message at some point that will start the protocol. This method
-	// blocks until the protocol is finished or an error is returned.
-	// If Stop is called, this method will return early without error.
+	// RBroadcast broadcasts the given value and returns.
+	RBroadcast(T) error
+	// Listen makes the node listen to the network for RBC messages. This method returns only
+	// when the context is stopped or its deadline exceeded returning any of the two errors.
 	Listen(ctx context.Context) error
 }
 

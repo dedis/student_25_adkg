@@ -160,8 +160,6 @@ func (n *SocketNetwork) Receive(ctx context.Context) ([]byte, error) {
 	case <-n.stop:
 		return nil, fmt.Errorf("network stopped")
 	case msg := <-n.incoming:
-		n.recvMutex.Lock()
-		n.recvMutex.Unlock()
 		return msg, nil
 	}
 }

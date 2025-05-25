@@ -59,6 +59,11 @@ func (f *FourRoundRBC) FreshHash(bs []byte) ([]byte, error) {
 	return h, nil
 }
 
+func (f *FourRoundRBC) SetPredicate(predicate func([]byte) bool) {
+	f.Lock()
+	defer f.Unlock()
+	f.predicate = predicate
+}
 func (f *FourRoundRBC) RBroadcast(message []byte) error {
 	// Send the broadcast
 	inst := createProposeMessage(message)

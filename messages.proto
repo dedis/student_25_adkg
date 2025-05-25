@@ -14,11 +14,10 @@ message RBCMessage{
   }
 
   message Ready{
-    bytes encodingShare=1;
-    bytes messageHash=2;
-    int64 index=3;
+    bytes encodingShare = 1;
+    bytes messageHash = 2;
+    int64 index = 3;
   }
-
   oneof op{
     Propose propose_inst=1;
     Echo echo_inst=2;
@@ -26,8 +25,28 @@ message RBCMessage{
   }
 }
 
+message SSMessage{
+  message Share{
+    bytes si=1;
+    bytes ri=2;
+    int64 idx=3;
+  }
+
+  message Reconstruct{
+    bytes si=1;
+    bytes ri=2;
+    int64 idx=3;
+  }
+
+  oneof op{
+    SSMessage.Share share_inst=3;
+    SSMessage.Reconstruct reconstruct_inst=4;
+  }
+}
+
 message Packet {
   oneof message {
     RBCMessage rbcMessage=1;
+    SSMessage ss_message_inst=2;
   }
 }

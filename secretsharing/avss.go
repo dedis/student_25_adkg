@@ -1,11 +1,14 @@
 package secretsharing
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"student_25_adkg/logging"
 	"student_25_adkg/pedersencommitment"
 	"student_25_adkg/rbc"
+	"student_25_adkg/rbc/fourrounds"
 	"student_25_adkg/secretsharing/typedefs"
 
 	"github.com/rs/zerolog"
@@ -36,12 +39,12 @@ type AVSS struct {
 	nodeID       int64
 	conf         Config
 	iface        rbc.AuthenticatedMessageStream
-	rbc          rbc.RBC[[]byte]
+	rbc          *fourrounds.FourRoundRBC
 	logger       zerolog.Logger
 	shareChannel chan *Deal
 }
 
-func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc rbc.RBC[[]byte]) *AVSS {
+func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc *fourrounds.FourRoundRBC) *AVSS {
 	registerPointAndScalarProtobufInterfaces(conf.g)
 	return &AVSS{
 		conf:         conf,
@@ -184,12 +187,7 @@ func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 		return err
 	}
 
-	commitBytes, err := encodeCommitment(commit)
-	if err != nil {
-		return err
-	}
-
-	err = a.rbc.RBroadcast(ctx, commitBytes)
+	err = a.reliableBroadcastCommitment(ctx, commit)
 	if err != nil {
 		return err
 	}
@@ -198,6 +196,49 @@ func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 
 	// TODO reconstruction phase
 
+	return nil
+}
+
+func (a *AVSS) waitForRBC(ctx context.Context, commitmentHash []byte) rbc.Instance[[]byte] {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case instance := <-a.rbc.GetFinishedChannel():
+			if bytes.Equal(instance.Identifier(), commitmentHash) {
+				return instance
+			}
+		}
+	}
+}
+
+func (a *AVSS) reliableBroadcastCommitment(ctx context.Context, commitment []kyber.Point) error {
+	commitBytes, err := encodeCommitment(commitment)
+	if err != nil {
+		return err
+	}
+
+	hash := sha256.New()
+	hash.Write(commitBytes)
+	commitmentHash := hash.Sum(nil)
+
+	done := make(chan bool)
+	go func() {
+		state := a.waitForRBC(ctx, commitmentHash)
+
+		done <- state != nil
+	}()
+
+	err = a.rbc.RBroadcast(commitBytes)
+	if err != nil {
+		return err
+	}
+
+	success := <-done
+
+	if !success {
+		return errors.New("failed to broadcast commitment")
+	}
 	return nil
 }
 

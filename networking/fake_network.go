@@ -62,22 +62,6 @@ func (n *FakeNetwork) computeDelayFromTo(from, to int64) (time.Duration, bool) {
 	return delay, true
 }
 
-func (n *FakeNetwork) computeDelayFromTo(from, to int64) (time.Duration, bool) {
-	delayOut, okOut := n.delayMap[from]
-	delayIn, okIn := n.delayMap[to]
-	if !okOut && !okIn {
-		return 0, false
-	}
-	if !okOut {
-		delayOut = time.Duration(0)
-	}
-	if !okIn {
-		delayIn = time.Duration(0)
-	}
-	delay := delayIn + delayOut
-	return delay, true
-}
-
 func (n *FakeNetwork) Send(msg []byte, from, to int64) error {
 	rcv, ok := n.nodes[to]
 	if !ok {

@@ -449,9 +449,9 @@ func (x *RBCMessage_Ready) GetIndex() int64 {
 
 type SSMessage_Share struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Si            []byte                 `protobuf:"bytes,1,opt,name=si,proto3" json:"si,omitempty"`
-	Ri            []byte                 `protobuf:"bytes,2,opt,name=ri,proto3" json:"ri,omitempty"`
-	Idx           int64                  `protobuf:"varint,3,opt,name=idx,proto3" json:"idx,omitempty"`
+	Si            [][]byte               `protobuf:"bytes,1,rep,name=si,proto3" json:"si,omitempty"`
+	Ri            [][]byte               `protobuf:"bytes,2,rep,name=ri,proto3" json:"ri,omitempty"`
+	Indices       []int64                `protobuf:"varint,3,rep,packed,name=indices,proto3" json:"indices,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -486,25 +486,25 @@ func (*SSMessage_Share) Descriptor() ([]byte, []int) {
 	return file_messages_proto_rawDescGZIP(), []int{1, 0}
 }
 
-func (x *SSMessage_Share) GetSi() []byte {
+func (x *SSMessage_Share) GetSi() [][]byte {
 	if x != nil {
 		return x.Si
 	}
 	return nil
 }
 
-func (x *SSMessage_Share) GetRi() []byte {
+func (x *SSMessage_Share) GetRi() [][]byte {
 	if x != nil {
 		return x.Ri
 	}
 	return nil
 }
 
-func (x *SSMessage_Share) GetIdx() int64 {
+func (x *SSMessage_Share) GetIndices() []int64 {
 	if x != nil {
-		return x.Idx
+		return x.Indices
 	}
-	return 0
+	return nil
 }
 
 type SSMessage_Reconstruct struct {
@@ -588,15 +588,15 @@ const file_messages_proto_rawDesc = "" +
 	"\rencodingShare\x18\x01 \x01(\fR\rencodingShare\x12 \n" +
 	"\vmessageHash\x18\x02 \x01(\fR\vmessageHash\x12\x14\n" +
 	"\x05index\x18\x03 \x01(\x03R\x05indexB\x04\n" +
-	"\x02op\"\x97\x02\n" +
+	"\x02op\"\x9f\x02\n" +
 	"\tSSMessage\x12:\n" +
 	"\n" +
 	"share_inst\x18\x03 \x01(\v2\x19.typedefs.SSMessage.ShareH\x00R\tshareInst\x12L\n" +
-	"\x10reconstruct_inst\x18\x04 \x01(\v2\x1f.typedefs.SSMessage.ReconstructH\x00R\x0freconstructInst\x1a9\n" +
+	"\x10reconstruct_inst\x18\x04 \x01(\v2\x1f.typedefs.SSMessage.ReconstructH\x00R\x0freconstructInst\x1aA\n" +
 	"\x05Share\x12\x0e\n" +
-	"\x02si\x18\x01 \x01(\fR\x02si\x12\x0e\n" +
-	"\x02ri\x18\x02 \x01(\fR\x02ri\x12\x10\n" +
-	"\x03idx\x18\x03 \x01(\x03R\x03idx\x1a?\n" +
+	"\x02si\x18\x01 \x03(\fR\x02si\x12\x0e\n" +
+	"\x02ri\x18\x02 \x03(\fR\x02ri\x12\x18\n" +
+	"\aindices\x18\x03 \x03(\x03R\aindices\x1a?\n" +
 	"\vReconstruct\x12\x0e\n" +
 	"\x02si\x18\x01 \x01(\fR\x02si\x12\x0e\n" +
 	"\x02ri\x18\x02 \x01(\fR\x02ri\x12\x10\n" +

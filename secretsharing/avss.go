@@ -9,7 +9,7 @@ import (
 	"student_25_adkg/pedersencommitment"
 	"student_25_adkg/rbc"
 	"student_25_adkg/rbc/fourrounds"
-	"student_25_adkg/secretsharing/typedefs"
+	"student_25_adkg/typedefs"
 
 	"github.com/rs/zerolog"
 	"go.dedis.ch/kyber/v4"
@@ -36,23 +36,30 @@ type Config struct {
 }
 
 type AVSS struct {
-	nodeID       int64
-	conf         Config
-	iface        rbc.AuthenticatedMessageStream
-	rbc          *fourrounds.FourRoundRBC
-	logger       zerolog.Logger
-	shareChannel chan *Deal
+	nodeID        int64
+	conf          Config
+	iface         rbc.AuthenticatedMessageStream
+	rbc           rbc.RBC[[]byte]
+	logger        zerolog.Logger
+	shareChannel  chan *Deal
+	myDeal        *Deal
+	shares        []*share.PriShare
+	commitment    []kyber.Point
+	result        kyber.Scalar
+	finishChannel chan struct{}
 }
 
 func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc *fourrounds.FourRoundRBC) *AVSS {
 	registerPointAndScalarProtobufInterfaces(conf.g)
 	return &AVSS{
-		conf:         conf,
-		logger:       logging.GetLogger(nodeID),
-		shareChannel: make(chan *Deal),
-		nodeID:       nodeID,
-		iface:        stream,
-		rbc:          rbc,
+		conf:          conf,
+		logger:        logging.GetLogger(nodeID),
+		shareChannel:  make(chan *Deal),
+		nodeID:        nodeID,
+		iface:         stream,
+		rbc:           rbc,
+		shares:        make([]*share.PriShare, 0),
+		finishChannel: make(chan struct{}),
 	}
 }
 
@@ -68,42 +75,25 @@ func registerPointAndScalarProtobufInterfaces(g kyber.Group) {
 }
 
 type Deal struct {
-	idx int64
-	si  *share.PriShare
-	ri  *share.PriShare
+	si *share.PriShare
+	ri *share.PriShare
 }
 
-func dealToShareInstruction(deal *Deal) (*typedefs.Instruction, error) {
-	siBytes, err := protobuf.Encode(deal.si)
-	if err != nil {
-		return nil, err
-	}
-	riBytes, err := protobuf.Encode(deal.ri)
-	if err != nil {
-		return nil, err
-	}
-
-	inst := createShareMessage(siBytes, riBytes, deal.idx)
-
-	return inst, nil
-}
-
-func shareMessageToDeal(shareMsg *typedefs.Message_Share) (*Deal, error) {
+func shareMessageToDeal(siBytes, riBytes []byte, idx int64) (*Deal, error) {
 	si := &share.PriShare{}
-	err := protobuf.Decode(shareMsg.GetSi(), si)
+	err := protobuf.Decode(siBytes, si)
 	if err != nil {
 		return nil, err
 	}
 	ri := &share.PriShare{}
-	err = protobuf.Decode(shareMsg.GetRi(), ri)
+	err = protobuf.Decode(riBytes, ri)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Deal{
-		idx: shareMsg.Idx,
-		si:  si,
-		ri:  ri,
+		si: si,
+		ri: ri,
 	}, nil
 }
 
@@ -111,7 +101,7 @@ func encodeCommitment(commits []kyber.Point) ([]byte, error) {
 	encoded := make([]byte, 0)
 
 	for _, point := range commits {
-		bs, err := protobuf.Encode(point)
+		bs, err := point.MarshalBinary()
 		if err != nil {
 			return nil, err
 		}
@@ -128,8 +118,8 @@ func decodeCommitment(bs []byte, g kyber.Group) ([]kyber.Point, error) {
 	start := 0
 	for start <= len(bs)-pointSize {
 		shareBytes := bs[start : start+pointSize]
-		s := g.Point()
-		err := protobuf.Decode(shareBytes, s)
+		s := g.Point().Null()
+		err := s.UnmarshalBinary(shareBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -151,29 +141,50 @@ func (a *AVSS) predicate(bs []byte) bool {
 	// Wait for the share to be received
 	s := <-a.shareChannel
 
-	ok := pedersencommitment.PedPolyVerify(commitment, s.idx, s.si, s.ri, a.conf.g, a.conf.g0, a.conf.g1)
+	if a.nodeID == 1 {
+		a.logger.Trace().Msgf("Received commitment for node %d", a.nodeID)
+	}
+
+	ok := pedersencommitment.PedPolyVerify(commitment, int64(s.si.I), s.si, s.ri, a.conf.g, a.conf.g0, a.conf.g1)
+	if ok {
+		a.commitment = commitment
+	}
 
 	return ok
 }
 
 func (a *AVSS) sendShares(sShares, rShares []*share.PriShare) error {
-	// Broadcast the shares for each
+	sSharesBytes := make([][]byte, len(sShares))
+	rSharesBytes := make([][]byte, len(rShares))
+	indices := make([]int64, len(sShares))
+	// Broadcast the shares
 	for i := 0; i < a.conf.n; i++ {
-		d := &Deal{
-			si:  sShares[i],
-			ri:  rShares[i],
-			idx: int64(sShares[i].I),
-		}
-		inst, err := dealToShareInstruction(d)
+		sBytes, err := protobuf.Encode(sShares[i])
 		if err != nil {
 			return err
 		}
-
-		err = a.broadcastInstruction(inst)
+		rBytes, err := protobuf.Encode(rShares[i])
 		if err != nil {
 			return err
 		}
+		sSharesBytes[i] = sBytes
+		rSharesBytes[i] = rBytes
+		indices[i] = int64(sShares[i].I)
 	}
+
+	shareMessage := createShareMessage(sSharesBytes, rSharesBytes, indices)
+
+	return a.broadcastMessage(shareMessage)
+}
+
+func (a *AVSS) Start(ctx context.Context) error {
+	go func() {
+		a.rbc.Listen(ctx)
+	}()
+
+	go func() {
+		a.start(ctx)
+	}()
 	return nil
 }
 
@@ -192,9 +203,20 @@ func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
 		return err
 	}
 
-	// Sharing finishes when the broadcast finishes
+	siBytes, err := protobuf.Encode(a.myDeal.si)
+	if err != nil {
+		return err
+	}
+	riBytes, err := protobuf.Encode(a.myDeal.ri)
+	if err != nil {
+		return err
+	}
 
-	// TODO reconstruction phase
+	reconstructMessage := createReconstructMessage(siBytes, riBytes, int64(a.myDeal.si.I))
+	err = a.broadcastMessage(reconstructMessage)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -224,6 +246,7 @@ func (a *AVSS) reliableBroadcastCommitment(ctx context.Context, commitment []kyb
 
 	done := make(chan bool)
 	go func() {
+		a.logger.Info().Msg("Waiting for reliable commitment")
 		state := a.waitForRBC(ctx, commitmentHash)
 
 		done <- state != nil
@@ -234,6 +257,8 @@ func (a *AVSS) reliableBroadcastCommitment(ctx context.Context, commitment []kyb
 		return err
 	}
 
+	a.logger.Info().Msg("Reliable commitment sent")
+
 	success := <-done
 
 	if !success {
@@ -242,70 +267,60 @@ func (a *AVSS) reliableBroadcastCommitment(ctx context.Context, commitment []kyb
 	return nil
 }
 
-func (a *AVSS) Listen(ctx context.Context) (kyber.Scalar, error) {
-	// Wait for an RBC instance to finish
-	err := a.rbc.Listen(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// TODO reconstruction phase
-
-	return nil, nil
-}
-
 // start listens for packets on the interface and handles them. Returns a channel that will
 // return nil when the protocol finishes or an error if it stopped or any other reason
-func (a *AVSS) start(ctx context.Context) chan error {
-	finishedChan := make(chan error)
-	go func() {
-		for {
-			bs, err := a.iface.Receive(ctx)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					a.logger.Warn().Err(err).Msg("context canceled")
-					finishedChan <- err
-					return
-				}
-				a.logger.Error().Err(err).Msg("error receiving message")
-				continue
+func (a *AVSS) start(ctx context.Context) error {
+	for {
+		bs, err := a.iface.Receive(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				a.logger.Warn().Err(err).Msg("context canceled")
+				return err
 			}
-			msg := &typedefs.Instruction{}
-			err = protobuf.Decode(bs, msg)
-			if err != nil {
-				a.logger.Error().Err(err).Msg("error decoding message")
-				continue
-			}
-			_, err = a.handleMsg(msg)
-			if err != nil {
-				a.logger.Err(err).Msg("Error handling message")
-				continue
-			}
+			a.logger.Error().Err(err).Msg("error receiving message")
+			continue
 		}
-	}()
-	return finishedChan
+		msg := &typedefs.Instruction{}
+		err = proto.Unmarshal(bs, msg)
+		if err != nil {
+			a.logger.Error().Err(err).Msg("error decoding message")
+			continue
+		}
+
+		ssMessage, ok := msg.GetOp().(*typedefs.Instruction_SsMessageInst)
+		if !ok {
+			continue
+		}
+
+		_, err = a.handleMsg(ssMessage.SsMessageInst)
+		if err != nil {
+			a.logger.Err(err).Msg("Error handling message")
+			continue
+		}
+
+	}
 }
 
-func (a *AVSS) handleMsg(msg *typedefs.Instruction) (bool, error) {
+func (a *AVSS) handleMsg(msg *typedefs.SSMessage) (bool, error) {
 	var err error
 	switch msg.GetOp().(type) {
-	case *typedefs.Instruction_ShareInst:
+	case *typedefs.SSMessage_ShareInst:
 		err = a.receiveShare(msg.GetShareInst())
-	case *typedefs.Instruction_ReconstructInst:
-		// TODO
+	case *typedefs.SSMessage_ReconstructInst:
+		err = a.receiveReconstruct(msg.GetReconstructInst())
 	default:
 		err = xerrors.New("unknown instruction received in AVSS")
 	}
 	return false, err
 }
 
-func (a *AVSS) receiveShare(shareMsg *typedefs.Message_Share) error {
-	// Check that the msg is for us
-	if shareMsg.GetIdx() != a.nodeID {
-		return nil
-	}
+func (a *AVSS) receiveShare(shareMsg *typedefs.SSMessage_Share) error {
+	// Extract the shares for this node
+	si := shareMsg.GetSi()[a.nodeID-1]
+	ri := shareMsg.GetRi()[a.nodeID-1]
+	idx := shareMsg.GetIndices()[a.nodeID-1]
 
-	deal, err := shareMessageToDeal(shareMsg)
+	deal, err := shareMessageToDeal(si, ri, idx)
 	if err != nil {
 		return err
 	}
@@ -313,21 +328,73 @@ func (a *AVSS) receiveShare(shareMsg *typedefs.Message_Share) error {
 	go func() {
 		a.shareChannel <- deal
 	}()
+	a.myDeal = deal
 	return nil
 }
 
-func createShareMessage(si, ri []byte, i int64) *typedefs.Instruction {
-	echoMsg := &typedefs.Message_Share{
-		Si:  si,
-		Ri:  ri,
-		Idx: i,
+func (a *AVSS) receiveReconstruct(receiveMessage *typedefs.SSMessage_Reconstruct) error {
+	si := receiveMessage.GetSi()
+	ri := receiveMessage.GetRi()
+	idx := receiveMessage.GetIdx()
+
+	deal, err := shareMessageToDeal(si, ri, idx)
+	if err != nil {
+		return err
 	}
-	op := &typedefs.Instruction_ShareInst{ShareInst: echoMsg}
-	inst := &typedefs.Instruction{Op: op}
-	return inst
+
+	if a.commitment == nil || !pedersencommitment.PedPolyVerify(a.commitment, int64(deal.si.I), deal.si, deal.ri, a.conf.g, a.conf.g0, a.conf.g1) {
+		return errors.New("no commitment or could not verify share")
+	}
+
+	a.shares = append(a.shares, deal.si)
+	if len(a.shares) < a.conf.t+1 {
+		return nil
+	}
+
+	// Enough shares to reconstruct the original value
+	if a.result == nil {
+		a.result = a.reconstruct()
+		close(a.finishChannel)
+	}
+	return nil
 }
 
-func (a *AVSS) broadcastInstruction(instruction *typedefs.Instruction) error {
+func (a *AVSS) GetFinishedChannel() <-chan struct{} {
+	return a.finishChannel
+}
+
+func (a *AVSS) reconstruct() kyber.Scalar {
+	scalars := make([]kyber.Scalar, len(a.shares))
+	for i, s := range a.shares {
+		scalars[i] = s.V
+	}
+	poly := share.CoefficientsToPriPoly(a.conf.g, scalars)
+	return poly.Secret()
+}
+
+func createShareMessage(si, ri [][]byte, indices []int64) *typedefs.SSMessage {
+	shareMessage := &typedefs.SSMessage_Share{
+		Si:      si,
+		Ri:      ri,
+		Indices: indices,
+	}
+	message := &typedefs.SSMessage{Op: &typedefs.SSMessage_ShareInst{ShareInst: shareMessage}}
+	return message
+}
+
+func createReconstructMessage(si, ri []byte, idx int64) *typedefs.SSMessage {
+	reconstructMessage := &typedefs.SSMessage_Reconstruct{
+		Si:  si,
+		Ri:  ri,
+		Idx: idx,
+	}
+	message := &typedefs.SSMessage{Op: &typedefs.SSMessage_ReconstructInst{ReconstructInst: reconstructMessage}}
+	return message
+}
+
+func (a *AVSS) broadcastMessage(message *typedefs.SSMessage) error {
+	avssInstruction := &typedefs.Instruction_SsMessageInst{SsMessageInst: message}
+	instruction := &typedefs.Instruction{Op: avssInstruction}
 	out, err := proto.Marshal(instruction)
 	if err != nil {
 		return err

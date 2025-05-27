@@ -2,16 +2,23 @@ package secretsharing
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
+	"student_25_adkg/logging"
 	"student_25_adkg/networking"
 	"student_25_adkg/rbc"
+	"student_25_adkg/rbc/fourrounds"
+	"student_25_adkg/reedsolomon"
 	"sync"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/group/edwards25519"
 )
 
-var defaultThreshold = 3
+var defaultThreshold = 2
 
 func getDefaultConfig() Config {
 	g := edwards25519.NewBlakeSHA256Ed25519()
@@ -28,78 +35,190 @@ func getDefaultConfig() Config {
 	}
 }
 
+type Instance struct {
+	finished bool
+	success  bool
+	value    []byte
+	hash     []byte
+	sync.RWMutex
+}
+
+func NewInstance(messageHash []byte) *Instance {
+	return &Instance{
+		hash: messageHash,
+	}
+}
+
+func (i *Instance) Identifier() []byte {
+	i.RLock()
+	defer i.RUnlock()
+	return i.hash
+}
+
+func (i *Instance) GetValue() []byte {
+	i.RLock()
+	defer i.RUnlock()
+	return i.value
+}
+
+func (i *Instance) Finished() bool {
+	i.RLock()
+	defer i.RUnlock()
+	return i.finished
+}
+
+func (i *Instance) Success() bool {
+	i.RLock()
+	defer i.RUnlock()
+	return i.success
+}
+
+func (i *Instance) Finish(value []byte) bool {
+	i.Lock()
+	defer i.Unlock()
+	if i.finished {
+		return false
+	}
+	i.finished = true
+	i.value = value
+	i.success = true
+	return true
+}
+
 type MockRBC struct {
-	predicate     func([]byte) bool
-	consensusChan chan []byte
-	finished      bool
-	value         []byte
-	broadcasted   []byte
+	predicate    func([]byte) bool
+	finishedChan chan rbc.Instance[[]byte]
+	iface        networking.NetworkInterface
+	states       map[string]*Instance
+	logger       zerolog.Logger
+	sync.RWMutex
 }
 
-func NewMockRBC(predicate func([]byte) bool) *MockRBC {
+func NewMockRBC(iface networking.NetworkInterface, predicate func([]byte) bool) *MockRBC {
 	return &MockRBC{
-		predicate:     predicate,
-		consensusChan: make(chan []byte),
+		predicate:    predicate,
+		finishedChan: make(chan rbc.Instance[[]byte]),
+		iface:        iface,
+		states:       make(map[string]*Instance),
+		logger:       logging.GetLogger(iface.GetID()),
 	}
 }
 
-func (m *MockRBC) waitConsensus(ctx context.Context) error {
-	m.consensusChan = make(chan []byte)
-
-	// Wait for consensus to be reached
-	select {
-	case value := <-m.consensusChan:
-		m.value = value
-		m.finished = true
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (m *MockRBC) RBroadcast(ctx context.Context, msg []byte) error {
+func (m *MockRBC) RBroadcast(msg []byte) error {
 	ok := m.predicate(msg)
 	if !ok {
 		return rbc.ErrPredicateRejected
 	}
-	m.broadcasted = msg
-	return m.waitConsensus(ctx)
+
+	return m.iface.Broadcast(msg)
 }
 
 func (m *MockRBC) Listen(ctx context.Context) error {
-	return m.waitConsensus(ctx)
+	for {
+		msg, err := m.iface.Receive(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			continue
+		}
+		m.logger.Info().Msg("Finished instance")
+
+		m.Lock()
+		hasher := sha256.New()
+		hasher.Write(msg)
+		hash := hasher.Sum(nil)
+
+		state, ok := m.states[string(hash)]
+		if !ok {
+			state = NewInstance(hash)
+			m.states[string(hash)] = state
+		}
+
+		_ = state.Finish(msg)
+		m.finishedChan <- state
+		m.Unlock()
+	}
 }
 
-func (m *MockRBC) setConsensusReached(val []byte) {
-	m.consensusChan <- val
+func (m *MockRBC) GetFinishedChannel() <-chan rbc.Instance[[]byte] {
+	return m.finishedChan
 }
 
 type TestNode struct {
 	iface networking.NetworkInterface
 	avss  *AVSS
-	rbc   *MockRBC
+	rbc   *fourrounds.FourRoundRBC
 }
 
-func NewTestNode(iface networking.NetworkInterface, conf Config, nodeID int64) *TestNode {
-	mockRBC := NewMockRBC(func([]byte) bool { return true })
-	avss := NewAVSS(conf, nodeID, iface, mockRBC)
-	mockRBC.predicate = avss.predicate
+func NewTestNode(iface networking.NetworkInterface, conf Config, nodeID int64, rbc *fourrounds.FourRoundRBC) *TestNode {
+	avss := NewAVSS(conf, nodeID, iface, rbc)
+	rbc.SetPredicate(avss.predicate)
 	return &TestNode{
 		iface: iface,
-		avss:  NewAVSS(conf, nodeID, iface, mockRBC),
-		rbc:   mockRBC,
+		avss:  avss,
+		rbc:   rbc,
 	}
 }
 
-func setupNetwork(nbNodes int) (*networking.FakeNetwork, []networking.NetworkInterface) {
+func setupNetwork(nbNodes int) (networking.Network, []networking.NetworkInterface, error) {
 	network := networking.NewFakeNetwork()
 
 	nodes := make([]networking.NetworkInterface, nbNodes)
 	for i := 0; i < nbNodes; i++ {
-		nodes[i] = network.JoinNetwork()
+		node, err := network.JoinNetwork()
+		if err != nil {
+			return nil, nil, err
+		}
+		nodes[i] = node
 	}
 
-	return network, nodes
+	return network, nodes, nil
+}
+
+func createNodes(network networking.Network, interfaces []networking.NetworkInterface, config Config) ([]*TestNode, error) {
+	nodes := make([]*TestNode, len(interfaces))
+	for i, iface := range interfaces {
+		rs := reedsolomon.NewBWCodes(config.t+1, config.n)
+		rbcIface, err := network.JoinNetwork()
+		if err != nil {
+			return nil, err
+		}
+		fourRoundsRBC := fourrounds.NewFourRoundRBC(nil, sha256.New(), config.t, rbcIface, rs, iface.GetID())
+		nodes[i] = NewTestNode(iface, config, iface.GetID(), fourRoundsRBC)
+	}
+	return nodes, nil
+}
+
+func startNodes(ctx context.Context, nodes []*TestNode) {
+	for _, node := range nodes {
+		go func() {
+			node.avss.start(ctx)
+		}()
+	}
+}
+
+func TestAVSS_EncodeDecodeCommitment(t *testing.T) {
+	g := edwards25519.NewBlakeSHA256Ed25519()
+
+	commitLength := 3
+	v := make([]kyber.Point, commitLength)
+	for i := 0; i < commitLength; i++ {
+		v[i] = g.Point().Pick(g.RandomStream())
+	}
+
+	encodedCommitment, err := encodeCommitment(v)
+	require.NoError(t, err)
+
+	require.Equal(t, len(encodedCommitment), len(v)*g.PointLen())
+
+	decodedCommitment, err := decodeCommitment(encodedCommitment, g)
+	require.NoError(t, err)
+
+	require.Equal(t, len(v), len(decodedCommitment))
+	for i := 0; i < commitLength; i++ {
+		require.True(t, v[i].Equal(decodedCommitment[i]))
+	}
 }
 
 // TestAVSS_EndToEndSimple tests that starting an AVSS instance
@@ -107,33 +226,40 @@ func TestAVSS_EndToEndSimple(t *testing.T) {
 	conf := getDefaultConfig()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	_, interfaces := setupNetwork(conf.n)
-
-	secret := conf.g.Scalar().SetInt64(int64(5))
-
-	wg := sync.WaitGroup{}
-	nodes := make([]*TestNode, conf.n)
-	for i, node := range interfaces {
-		nodes[i] = NewTestNode(node, conf, int64(i+1))
-		if i != 0 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				s, err := nodes[i].avss.Listen(ctx)
-				require.NoError(t, err)
-				require.True(t, s.Equal(secret))
-			}()
-		}
-	}
-
-	// Start AVSS
-	err := nodes[0].avss.Share(ctx, secret)
+	network, interfaces, err := setupNetwork(conf.n)
 	require.NoError(t, err)
 
-	// Finish mock RBC on all nodes
-	msg := nodes[0].rbc.broadcasted
-	for _, n := range nodes {
-		n.rbc.setConsensusReached(msg)
+	nodes, err := createNodes(network, interfaces, conf)
+	require.NoError(t, err)
+
+	startNodes(ctx, nodes)
+
+	wg := sync.WaitGroup{}
+	for _, node := range nodes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startErr := node.avss.Start(ctx)
+			require.NoError(t, startErr)
+		}()
+	}
+
+	// Start AVSS for all nodes
+	for i, node := range nodes {
+		secret := conf.g.Scalar().SetInt64(int64(i))
+		shareErr := node.avss.Share(ctx, secret)
+		require.NoError(t, shareErr)
+	}
+
+	for i, node := range nodes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-node.avss.GetFinishedChannel()
+			expected := conf.g.Scalar().SetInt64(int64(i))
+			result := node.avss.result
+			require.True(t, expected.Equal(result))
+		}()
 	}
 
 	// Wait for all nodes to finish

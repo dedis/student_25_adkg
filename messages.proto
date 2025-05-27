@@ -27,9 +27,9 @@ message RBCMessage{
 
 message SSMessage{
   message Share{
-    bytes si=1;
-    bytes ri=2;
-    int64 idx=3;
+    repeated bytes si=1;
+    repeated bytes ri=2;
+    repeated int64 indices=3;
   }
 
   message Reconstruct{

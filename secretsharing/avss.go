@@ -266,9 +266,13 @@ func (a *AVSS) initiateReconstruction(state rbc.Instance[[]byte]) {
 func (a *AVSS) Share(s kyber.Scalar) error {
 	// Randomly sample a polynomial s.t. the origin is at s
 	p := share.NewPriPoly(a.conf.g, a.conf.t, s, random.New())
-	commit, sShares, rShares := pedersencommitment.PedPolyCommit(p, a.conf.t, a.conf.n, a.conf.g, a.conf.g0, a.conf.g1)
+	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, a.conf.t,
+		a.conf.n, a.conf.g, a.conf.g0, a.conf.g1)
+	if err != nil {
+		return err
+	}
 
-	err := a.sendShares(sShares, rShares)
+	err = a.sendShares(sShares, rShares)
 	if err != nil {
 		return err
 	}

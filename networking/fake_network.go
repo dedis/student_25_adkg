@@ -137,11 +137,21 @@ func (f *FakeInterface) GetID() int64 {
 func (f *FakeInterface) GetSent() [][]byte {
 	f.RLock()
 	defer f.RUnlock()
-	return f.sent
+	duplicate := make([][]byte, len(f.sent))
+	for i, msg := range f.sent {
+		duplicate[i] = make([]byte, len(msg))
+		copy(duplicate[i], msg)
+	}
+	return duplicate
 }
 
 func (f *FakeInterface) GetReceived() [][]byte {
 	f.RLock()
 	defer f.RUnlock()
-	return f.received
+	duplicate := make([][]byte, len(f.received))
+	for i, msg := range f.received {
+		duplicate[i] = make([]byte, len(msg))
+		copy(duplicate[i], msg)
+	}
+	return duplicate
 }

@@ -138,7 +138,10 @@ func (f *FakeInterface) GetSent() [][]byte {
 	f.RLock()
 	defer f.RUnlock()
 	duplicate := make([][]byte, len(f.sent))
-	copy(duplicate, f.sent)
+	for i, msg := range f.sent {
+		duplicate[i] = make([]byte, len(msg))
+		copy(duplicate[i], msg)
+	}
 	return duplicate
 }
 

@@ -26,7 +26,8 @@ func TestPedersenCommitment_PolyCommit(t *testing.T) {
 	p := share.NewPriPoly(g, threshold, secret, random.New())
 
 	// Run commitment
-	v, s, r := PedPolyCommit(p, threshold, n, g, g0, g1)
+	v, s, r, err := PedPolyCommit(p, threshold, n, g, g0, g1)
+	require.NoError(t, err)
 
 	// Recover the polynomials p and phi
 	sPoly, err := share.RecoverPriPoly(g, s, threshold, n)
@@ -71,7 +72,8 @@ func TestPedersenCommitment_SimpleEndToEnd(t *testing.T) {
 	p := share.NewPriPoly(g, threshold, secret, random.New())
 
 	// Run commitment
-	v, s, r := PedPolyCommit(p, threshold, n, g, g0, g1)
+	v, s, r, err := PedPolyCommit(p, threshold, n, g, g0, g1)
+	require.NoError(t, err)
 
 	for i := range s {
 		si := s[i]

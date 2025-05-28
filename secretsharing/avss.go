@@ -57,7 +57,6 @@ const (
 type Deal struct {
 	sShare *share.PriShare
 	rShare *share.PriShare
-	index  uint32
 }
 
 func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc *fourrounds.FourRoundRBC) *AVSS {
@@ -150,7 +149,7 @@ func unmarshalShares(sBytes, rBytes []byte) (sShare, rShare *share.PriShare, err
 func verifyDeal(deal *Deal, commitment []kyber.Point, config Config) bool {
 	sShare := deal.sShare
 	rShare := deal.rShare
-	index := int64(deal.index)
+	index := int64(deal.sShare.I)
 	ok := pedersencommitment.PedPolyVerify(commitment, index, sShare, rShare, config.g, config.g0, config.g1)
 	return ok
 }
@@ -174,7 +173,6 @@ func (a *AVSS) predicate(bs []byte) bool {
 func (a *AVSS) sendShares(sShares, rShares []*share.PriShare) error {
 	sSharesBytes := make([][]byte, len(sShares))
 	rSharesBytes := make([][]byte, len(rShares))
-	indices := make([]int64, len(sShares))
 	for i := 0; i < a.conf.n; i++ {
 		sBytes, rBytes, err := marshalShares(sShares[i], rShares[i])
 		if err != nil {
@@ -182,10 +180,9 @@ func (a *AVSS) sendShares(sShares, rShares []*share.PriShare) error {
 		}
 		sSharesBytes[i] = sBytes
 		rSharesBytes[i] = rBytes
-		indices[i] = int64(sShares[i].I)
 	}
 
-	shareMessage := createShareMessage(sSharesBytes, rSharesBytes, indices)
+	shareMessage := createShareMessage(sSharesBytes, rSharesBytes)
 	// Broadcast the SHARE message
 	return a.broadcastMessage(shareMessage)
 }
@@ -196,12 +193,12 @@ func (a *AVSS) Start(ctx context.Context) {
 	a.listenToInstances(ctx)
 	go func() {
 		err := a.rbc.Listen(ctx)
-		a.logger.Info().Err(err).Msg("Received an error when listening for RBC instances")
+		a.logger.Info().Err(err).Msg("RBC Listen was terminated")
 	}()
 
 	go func() {
 		err := a.start(ctx)
-		a.logger.Info().Err(err).Msg("Received an error when starting AVSS node")
+		a.logger.Info().Err(err).Msg("AVSS was terminated")
 	}()
 }
 
@@ -256,8 +253,7 @@ func (a *AVSS) initiateReconstruction(state rbc.Instance[[]byte]) {
 		return
 	}
 
-	index := int64(a.myDeal.index)
-	reconstructMessage := createReconstructMessage(siBytes, riBytes, index)
+	reconstructMessage := createReconstructMessage(siBytes, riBytes)
 	err = a.broadcastMessage(reconstructMessage)
 	if err != nil {
 		return
@@ -267,7 +263,7 @@ func (a *AVSS) initiateReconstruction(state rbc.Instance[[]byte]) {
 // Share starts an AVSS instance by sending a SHARE message to all nodes and starts an RBC instance.
 // Returns if any of these actions caused an error. Returns as soon as the SHARE messages is sent
 // and the RBC broadcast has been initiated (not finished!).
-func (a *AVSS) Share(ctx context.Context, s kyber.Scalar) error {
+func (a *AVSS) Share(s kyber.Scalar) error {
 	// Randomly sample a polynomial s.t. the origin is at s
 	p := share.NewPriPoly(a.conf.g, a.conf.t, s, random.New())
 	commit, sShares, rShares := pedersencommitment.PedPolyCommit(p, a.conf.t, a.conf.n, a.conf.g, a.conf.g0, a.conf.g1)
@@ -304,7 +300,6 @@ func (a *AVSS) start(ctx context.Context) error {
 		bs, err := a.iface.Receive(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				a.logger.Warn().Err(err).Msg("context canceled")
 				return err
 			}
 			a.logger.Error().Err(err).Msg("error receiving message")
@@ -358,7 +353,6 @@ func (a *AVSS) receiveShare(shareMsg *typedefs.SSMessage_Share) error {
 	// Extract the shares destined for this node
 	si := shareMsg.GetSi()[a.nodeID-1]
 	ri := shareMsg.GetRi()[a.nodeID-1]
-	idx := uint32(shareMsg.GetIndices()[a.nodeID-1])
 
 	sShare, rShare, err := unmarshalShares(si, ri)
 	if err != nil {
@@ -368,7 +362,6 @@ func (a *AVSS) receiveShare(shareMsg *typedefs.SSMessage_Share) error {
 	a.myDeal = &Deal{
 		sShare: sShare,
 		rShare: rShare,
-		index:  idx,
 	}
 
 	// Close the channel to indicate that SHARE message has been received and that myDeal is set
@@ -388,16 +381,19 @@ func (a *AVSS) receiveReconstruct(receiveMessage *typedefs.SSMessage_Reconstruct
 
 	si := receiveMessage.GetSi()
 	ri := receiveMessage.GetRi()
-	idx := receiveMessage.GetIdx()
 
 	sShare, rShare, err := unmarshalShares(si, ri)
 	if err != nil {
 		return err
 	}
+	deal := &Deal{
+		sShare: sShare,
+		rShare: rShare,
+	}
 
 	// Make sure to wait until the share channel is closed indicating that we have received the initial share message
 	<-a.shareChannel
-	if a.commitment == nil || !pedersencommitment.PedPolyVerify(a.commitment, idx, sShare, rShare, a.conf.g, a.conf.g0, a.conf.g1) {
+	if a.commitment == nil || !verifyDeal(deal, a.commitment, a.conf) {
 		return errors.New("no commitment or could not verify share")
 	}
 
@@ -440,21 +436,19 @@ func (a *AVSS) reconstruct() (kyber.Scalar, error) {
 	return poly.Secret(), nil
 }
 
-func createShareMessage(si, ri [][]byte, indices []int64) *typedefs.SSMessage {
+func createShareMessage(si, ri [][]byte) *typedefs.SSMessage {
 	shareMessage := &typedefs.SSMessage_Share{
-		Si:      si,
-		Ri:      ri,
-		Indices: indices,
+		Si: si,
+		Ri: ri,
 	}
 	message := &typedefs.SSMessage{Op: &typedefs.SSMessage_ShareInst{ShareInst: shareMessage}}
 	return message
 }
 
-func createReconstructMessage(si, ri []byte, idx int64) *typedefs.SSMessage {
+func createReconstructMessage(si, ri []byte) *typedefs.SSMessage {
 	reconstructMessage := &typedefs.SSMessage_Reconstruct{
-		Si:  si,
-		Ri:  ri,
-		Idx: idx,
+		Si: si,
+		Ri: ri,
 	}
 	message := &typedefs.SSMessage{Op: &typedefs.SSMessage_ReconstructInst{ReconstructInst: reconstructMessage}}
 	return message

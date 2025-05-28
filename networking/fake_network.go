@@ -146,6 +146,9 @@ func (f *FakeInterface) GetReceived() [][]byte {
 	f.RLock()
 	defer f.RUnlock()
 	duplicate := make([][]byte, len(f.received))
-	copy(duplicate, f.received)
+	for i, msg := range f.received {
+		duplicate[i] = make([]byte, len(msg))
+		copy(duplicate[i], msg)
+	}
 	return duplicate
 }

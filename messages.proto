@@ -29,13 +29,11 @@ message SSMessage{
   message Share{
     repeated bytes si=1;
     repeated bytes ri=2;
-    repeated int64 indices=3;
   }
 
   message Reconstruct{
     bytes si=1;
     bytes ri=2;
-    int64 idx=3;
   }
 
   oneof op{

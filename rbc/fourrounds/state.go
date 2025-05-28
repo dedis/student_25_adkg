@@ -57,7 +57,7 @@ func (s *State) ReadyShares() []*reedsolomon.Encoding {
 	return shares
 }
 
-func (s *State) FinalValue() []byte {
+func (s *State) GetValue() []byte {
 	s.RLock()
 	defer s.RUnlock()
 	return s.finalValue
@@ -73,6 +73,12 @@ func (s *State) Success() bool {
 	s.RLock()
 	defer s.RUnlock()
 	return s.success
+}
+
+func (s *State) Identifier() []byte {
+	s.RLock()
+	defer s.RUnlock()
+	return s.messageHash
 }
 
 // SetSentReady set the sentReady variable to true and returns

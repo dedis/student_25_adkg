@@ -23,7 +23,7 @@ type FourRoundRBC struct {
 	rs              reedsolomon.RSCodes
 	threshold       int
 	states          map[string]*State
-	finishedChannel chan *State
+	finishedChannel chan rbc.Instance[[]byte]
 	log             zerolog.Logger
 	nodeID          int64
 	sync.RWMutex
@@ -41,7 +41,7 @@ func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 		threshold:       threshold,
 		RWMutex:         sync.RWMutex{},
 		states:          make(map[string]*State),
-		finishedChannel: make(chan *State, 100),
+		finishedChannel: make(chan rbc.Instance[[]byte], 100),
 		log:             logging.GetLogger(nodeID),
 		nodeID:          nodeID,
 	}
@@ -321,7 +321,7 @@ func (f *FourRoundRBC) GetFinalValue(messageHash []byte) []byte {
 	if !ok {
 		return nil
 	}
-	return state.FinalValue()
+	return state.GetValue()
 }
 
 func (f *FourRoundRBC) GetState(messageHash []byte) (*State, bool) {
@@ -331,6 +331,6 @@ func (f *FourRoundRBC) GetState(messageHash []byte) (*State, bool) {
 	return state, ok
 }
 
-func (f *FourRoundRBC) GetFinishChannel() <-chan *State {
+func (f *FourRoundRBC) GetFinishedChannel() <-chan rbc.Instance[[]byte] {
 	return f.finishedChannel
 }

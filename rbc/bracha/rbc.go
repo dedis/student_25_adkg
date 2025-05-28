@@ -15,7 +15,7 @@ type RBC struct {
 	iface        rbc.AuthenticatedMessageStream
 	predicate    func(bool) bool
 	state        *State
-	finishedChan chan struct{}
+	finishedChan chan rbc.Instance[bool]
 	threshold    int
 	nodeID       int64
 	logger       zerolog.Logger
@@ -26,8 +26,8 @@ func NewBrachaRBC(predicate func(bool) bool, threshold int, iface rbc.Authentica
 	return &RBC{
 		predicate:    predicate,
 		iface:        iface,
-		state:        NewState(),
-		finishedChan: make(chan struct{}),
+		state:        NewState(1),
+		finishedChan: make(chan rbc.Instance[bool]),
 		threshold:    threshold,
 		logger:       logging.GetLogger(nodeID),
 		nodeID:       nodeID,
@@ -142,13 +142,13 @@ func (b *RBC) receiveReady(s bool) bool {
 	finished := readyCount > 2*b.threshold
 	if finished {
 		b.state.SetFinalValue(s)
-		close(b.finishedChan)
+		b.finishedChan <- b.state
 	}
 
 	return ready
 }
 
-func (b *RBC) GetFinishedChan() <-chan struct{} {
+func (b *RBC) GetFinishedChannel() <-chan rbc.Instance[bool] {
 	return b.finishedChan
 }
 

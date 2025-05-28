@@ -46,7 +46,7 @@ func waitForResult(ctx context.Context, t require.TestingT, nodes []*TestNode) *
 			select {
 			case <-ctx.Done():
 				break
-			case <-node.rbc.GetFinishedChan():
+			case <-node.rbc.GetFinishedChannel():
 				require.True(t, node.rbc.state.Success())
 			}
 

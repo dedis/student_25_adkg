@@ -25,6 +25,13 @@ type AuthenticatedMessageStream interface {
 	AuthenticatedMessageReceiver
 }
 
+type Instance[T any] interface {
+	Finished() bool
+	Success() bool
+	GetValue() T
+	Identifier() []byte
+}
+
 // RBC is an interface for an RBC protocol
 type RBC[T any] interface {
 	// RBroadcast broadcasts the given value and returns.
@@ -32,6 +39,9 @@ type RBC[T any] interface {
 	// Listen makes the node listen to the network for RBC messages. This method returns only
 	// when the context is stopped or its deadline exceeded returning any of the two errors.
 	Listen(ctx context.Context) error
+	// GetFinishedChannel returns a channel where finished instances a pushed in. When the
+	// RBC is finished, this channel will be closed.
+	GetFinishedChannel() <-chan Instance[T]
 }
 
 var ErrPredicateRejected = errors.New("predicate rejected")

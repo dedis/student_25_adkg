@@ -139,7 +139,8 @@ func (f *FourRoundRBC) receivePropose(msg *typedefs.RBCMessage_Propose) error {
 	}
 
 	// Encode to have a share to send for each node
-	encodings, err := f.rs.Encode(msg.GetContent())
+	padded := padMessage(msg.GetContent(), f.threshold+1)
+	encodings, err := f.rs.Encode(padded)
 	if err != nil {
 		return err
 	}
@@ -151,6 +152,38 @@ func (f *FourRoundRBC) receivePropose(msg *typedefs.RBCMessage_Propose) error {
 		return err
 	}
 	return nil
+}
+
+// padMessage pads the message to a multiple of the given k using
+// PKCS 7 padding
+func padMessage(msg []byte, k int) []byte {
+	paddingLength := k - (len(msg) % k)
+	if paddingLength == k {
+		return msg
+	}
+	padding := bytes.Repeat([]byte{byte(paddingLength)}, paddingLength)
+	return append(msg, padding...)
+}
+
+// removePadding remove PKCS 7 padding
+func removePadding(msg []byte, k int) ([]byte, error) {
+	if len(msg) == 0 || len(msg)%k != 0 {
+		return msg, nil
+	}
+
+	paddingLength := int(msg[len(msg)-1])
+	if paddingLength == 0 || paddingLength > k {
+		return msg, nil
+	}
+
+	// Validate that all the padding bytes are the same
+	for i := 0; i < paddingLength; i++ {
+		if msg[len(msg)-1-i] != byte(paddingLength) {
+			return nil, xerrors.New("unexpected padding byte")
+		}
+	}
+
+	return msg[:len(msg)-paddingLength], nil
 }
 
 func (f *FourRoundRBC) getOrCreateState(messageHash []byte) *State {
@@ -251,13 +284,18 @@ func (f *FourRoundRBC) reconstruct(shares []*reedsolomon.Encoding, expHash []byt
 		return nil, false, err
 	}
 
-	h, err := f.FreshHash(coefficients)
+	unpadded, err := removePadding(coefficients, f.threshold+1)
+	if err != nil {
+		return nil, false, err
+	}
+
+	h, err := f.FreshHash(unpadded)
 	if err != nil {
 		return nil, false, err
 	}
 
 	if bytes.Equal(h, expHash) {
-		return coefficients, true, nil
+		return unpadded, true, nil
 	}
 	return nil, false, nil
 }

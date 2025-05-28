@@ -64,7 +64,7 @@ type ECDHCommonCoin struct {
 	si      *share.PriShare
 	shares  map[uint32]*CoinShare
 	vks     []*share.PubShare // verifications
-	partyId uint32
+	partyID uint32
 	k       int // threshold
 	n       int // number of parties
 }
@@ -75,7 +75,7 @@ func NewECDHCommonCoin(
 	globalVK kyber.Point,
 	vks []*share.PubShare,
 	si *share.PriShare,
-	partyId uint32,
+	partyID uint32,
 	k int,
 	n int) (*ECDHCommonCoin, error) {
 	hashable, ok := suite.Point().(kyber.HashablePoint)
@@ -91,7 +91,7 @@ func NewECDHCommonCoin(
 		s:       suite,
 		gVK:     globalVK,
 		si:      si,
-		partyId: partyId,
+		partyID: partyID,
 		k:       k,
 		n:       n,
 		gTilde:  gTilde,
@@ -115,7 +115,7 @@ func (c *ECDHCommonCoin) LocalShare() (*CoinShare, error) {
 		return &CoinShare{}, err
 	}
 
-	pubGTildeShare := share.PubShare{V: gTildeShare, I: uint32(c.partyId)}
+	pubGTildeShare := share.PubShare{V: gTildeShare, I: uint32(c.partyID)}
 	coinShare := &CoinShare{GTildeShare: pubGTildeShare, Proof: proof}
 	return coinShare, nil
 }
@@ -129,6 +129,7 @@ func (c *ECDHCommonCoin) Toss() (CoinToss, error) {
 	for _, coinShare := range c.shares {
 		if c.VerifyShare(coinShare) != nil {
 			// log debug
+			continue
 		}
 		validPubShares = append(validPubShares, &coinShare.GTildeShare)
 	}
@@ -157,9 +158,9 @@ func (c *ECDHCommonCoin) Toss() (CoinToss, error) {
 func (c *ECDHCommonCoin) VerifyShare(cShare *CoinShare) error {
 	proof := cShare.Proof
 	gTildeShare := cShare.GTildeShare.V
-	sharePartyId := cShare.GTildeShare.I
-	sharePartyVK := c.vks[sharePartyId].V
-	if sharePartyId != c.vks[sharePartyId].I {
+	sharePartyID := cShare.GTildeShare.I
+	sharePartyVK := c.vks[sharePartyID].V
+	if sharePartyID != c.vks[sharePartyID].I {
 		return errors.New("coin share is stored at incorrect index")
 	}
 

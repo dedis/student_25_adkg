@@ -6,7 +6,8 @@ import (
 	"go.dedis.ch/kyber/v4/util/random"
 )
 
-func PedPolyCommit(p *share.PriPoly, t, n int, g kyber.Group, g0, g1 kyber.Point) ([]kyber.Point, []*share.PriShare, []*share.PriShare) {
+func PedPolyCommit(p *share.PriPoly, t, n int,
+	g kyber.Group, g0, g1 kyber.Point) (commit []kyber.Point, sShare, rShare []*share.PriShare, err error) {
 	phi := share.NewPriPoly(g, t, nil, random.New())
 
 	// Compute g0^p(x)
@@ -15,16 +16,16 @@ func PedPolyCommit(p *share.PriPoly, t, n int, g kyber.Group, g0, g1 kyber.Point
 	// Compute g1^phi(x)
 	pHatCommit := phi.Commit(g1)
 	// Compute g0^p(x)g1^phi(x)
-	commit, err := pCommit.Add(pHatCommit)
+	publicPoly, err := pCommit.Add(pHatCommit)
 	if err != nil {
-		return nil, nil, nil
+		return nil, nil, nil, err
 	}
 
-	_, v := commit.Info()
+	_, commit = publicPoly.Info()
 	s := p.Shares(n)
 	r := phi.Shares(n)
 
-	return v, s, r
+	return commit, s, r, nil
 }
 
 func PedPolyVerify(commits []kyber.Point, idx int64, si, ri *share.PriShare, g kyber.Group, g0, g1 kyber.Point) bool {

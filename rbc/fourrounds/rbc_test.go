@@ -668,6 +668,27 @@ func TestFourRoundsRBC_Simple(t *testing.T) {
 	cancel()
 }
 
+// TestFourRoundsRBC_SimplePadding run the network with
+// an unconventional message size and check that padding
+// the message works
+func TestFourRoundsRBC_SimplePadding(t *testing.T) {
+	// Config
+	ctx, cancel := context.WithCancel(context.Background())
+	network := networking.NewFakeNetwork()
+
+	threshold := 2
+
+	// Randomly generate the value to broadcast
+	message, hash := generateMessage(threshold + 2)
+
+	nodes, err := createNetwork(network, threshold)
+	require.NoError(t, err)
+
+	// Run RBC and check the result
+	runAndCheckRBC(ctx, t, nodes, message, hash)
+	cancel()
+}
+
 func setupWithDeadNodes(t *testing.T, threshold, nbDead int) []*TestNode {
 	// Config
 	network := networking.NewFakeNetwork()

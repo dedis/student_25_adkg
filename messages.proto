@@ -1,7 +1,8 @@
 syntax='proto3';
 package typedefs;
 option go_package ='./typedefs';
-message Message{
+
+message RBCMessage{
   message Propose{
     bytes content=1;
   }
@@ -19,11 +20,14 @@ message Message{
   }
 
   oneof op{
-    Propose propose_inst=3;
-    Echo echo_inst=4;
-    Ready ready_inst=5;
+    Propose propose_inst=1;
+    Echo echo_inst=2;
+    Ready ready_inst=3;
   }
 }
-message Instruction {
-  Message operation=1;
+
+message Packet {
+  oneof message {
+    RBCMessage rbcMessage=1;
+  }
 }

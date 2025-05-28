@@ -6,9 +6,9 @@ import (
 	"crypto/sha256"
 	"math/rand"
 	"student_25_adkg/networking"
-	"student_25_adkg/rbc/fourrounds/typedefs"
 	"student_25_adkg/reedsolomon"
 	"student_25_adkg/transport/udp"
+	"student_25_adkg/typedefs"
 	"sync"
 	"testing"
 	"time"
@@ -127,7 +127,12 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	// Send a PROPOSE message to the test node and check that it answers correctly
 	message, hash := generateMessage(threshold + 1)
 	proposeMessage := createProposeMessage(message)
-	proposeBytes, err := proto.Marshal(proposeMessage)
+	packet := &typedefs.Packet{
+		Message: &typedefs.Packet_RbcMessage{
+			RbcMessage: proposeMessage,
+		},
+	}
+	proposeBytes, err := proto.Marshal(packet)
 	require.NoError(t, err)
 
 	err = iface.Send(proposeBytes, node.GetID())
@@ -142,10 +147,12 @@ func TestFourRoundsRBC_Receive_Propose(t *testing.T) {
 	require.Equal(t, 1, len(received))
 
 	// Check that the message received is an ECHO and that the hash matches
-	instruction := &typedefs.Instruction{}
-	err = proto.Unmarshal(received[0], instruction)
+	packet = &typedefs.Packet{}
+	err = proto.Unmarshal(received[0], packet)
 	require.NoError(t, err)
-	echoMessage, ok := instruction.GetOperation().GetOp().(*typedefs.Message_EchoInst)
+	rbcMessage, ok := packet.GetMessage().(*typedefs.Packet_RbcMessage)
+	require.True(t, ok)
+	echoMessage, ok := rbcMessage.RbcMessage.GetOp().(*typedefs.RBCMessage_EchoInst)
 	require.True(t, ok)
 	messageHash := echoMessage.EchoInst.GetMessageHash()
 	require.True(t, bytes.Equal(messageHash, hash))
@@ -223,7 +230,12 @@ func TestFourRoundsRBC_Receive_Echo(t *testing.T) {
 	}
 	hash := []byte{5, 6, 7, 8}
 	echoMsg := createEchoMessage(fakeShares, hash)
-	echoBytes, err := proto.Marshal(echoMsg)
+	packet := &typedefs.Packet{
+		Message: &typedefs.Packet_RbcMessage{
+			RbcMessage: echoMsg,
+		},
+	}
+	echoBytes, err := proto.Marshal(packet)
 	require.NoError(t, err)
 
 	echoThreshold := 2*threshold + 1
@@ -335,7 +347,12 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 	sharedIdx := 0
 	for i := 0; i < readyThreshold-1; i++ {
 		readyMsg := createReadyMessage(fakeShares[sharedIdx].Val, hash, fakeShares[0].Idx)
-		readyBytes, err := proto.Marshal(readyMsg)
+		packet := &typedefs.Packet{
+			Message: &typedefs.Packet_RbcMessage{
+				RbcMessage: readyMsg,
+			},
+		}
+		readyBytes, err := proto.Marshal(packet)
 		require.NoError(t, err)
 		err = iface.Send(readyBytes, node.GetID())
 		require.NoError(t, err)
@@ -356,7 +373,12 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 
 	// Send t+1 message and expect nothing
 	readyMsg := createReadyMessage(fakeShares[sharedIdx].Val, hash, fakeShares[0].Idx)
-	readyBytes, err := proto.Marshal(readyMsg)
+	packet := &typedefs.Packet{
+		Message: &typedefs.Packet_RbcMessage{
+			RbcMessage: readyMsg,
+		},
+	}
+	readyBytes, err := proto.Marshal(packet)
 	require.NoError(t, err)
 	err = iface.Send(readyBytes, node.GetID())
 	require.NoError(t, err)
@@ -376,7 +398,12 @@ func TestFourRoundsRBC_Receive_Ready_before(t *testing.T) {
 
 	// Send t ECHO messages for the node and nothing should happen
 	echoMsg := createEchoMessage(fakeShares, hash)
-	echoBytes, err := proto.Marshal(echoMsg)
+	packet = &typedefs.Packet{
+		Message: &typedefs.Packet_RbcMessage{
+			RbcMessage: echoMsg,
+		},
+	}
+	echoBytes, err := proto.Marshal(packet)
 	require.NoError(t, err)
 
 	echoThreshold := threshold + 1
@@ -464,7 +491,12 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 
 	// Create an ECHO message
 	echoMsg := createEchoMessage(fakeShares, hash)
-	echoBytes, err := proto.Marshal(echoMsg)
+	packet := &typedefs.Packet{
+		Message: &typedefs.Packet_RbcMessage{
+			RbcMessage: echoMsg,
+		},
+	}
+	echoBytes, err := proto.Marshal(packet)
 	require.NoError(t, err)
 
 	// Sent t+1 ECHO and the node should do nothing (since no READY message has been sent, the
@@ -491,7 +523,12 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	// Send t READY messages and expect nothing each time
 	for i := 0; i < readyThreshold-1; i++ {
 		readyMsg := createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
-		readyBytes, err := proto.Marshal(readyMsg)
+		packet = &typedefs.Packet{
+			Message: &typedefs.Packet_RbcMessage{
+				RbcMessage: readyMsg,
+			},
+		}
+		readyBytes, err := proto.Marshal(packet)
 		require.NoError(t, err)
 		err = iface.Send(readyBytes, node.GetID())
 		require.NoError(t, err)
@@ -511,14 +548,24 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 
 	// Send the t+1 and t+2 READY message and expect one READY broadcast
 	readyMsg := createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
-	readyBytes, err := proto.Marshal(readyMsg)
+	packet = &typedefs.Packet{
+		Message: &typedefs.Packet_RbcMessage{
+			RbcMessage: readyMsg,
+		},
+	}
+	readyBytes, err := proto.Marshal(packet)
 	require.NoError(t, err)
 	err = iface.Send(readyBytes, node.GetID())
 	require.NoError(t, err)
 
 	shareIdx++
 	readyMsg = createReadyMessage(fakeShares[shareIdx].Val, hash, fakeShares[shareIdx].Idx)
-	readyBytes, err = proto.Marshal(readyMsg)
+	packet = &typedefs.Packet{
+		Message: &typedefs.Packet_RbcMessage{
+			RbcMessage: readyMsg,
+		},
+	}
+	readyBytes, err = proto.Marshal(packet)
 	require.NoError(t, err)
 	err = iface.Send(readyBytes, node.GetID())
 	require.NoError(t, err)
@@ -533,19 +580,23 @@ func TestFourRoundsRBC_Receive_Ready_after(t *testing.T) {
 	nSent := node.GetSent()
 	// Should have sent one READY message
 	require.Equal(t, 1, len(nSent))
-	msg := &typedefs.Instruction{}
-	err = proto.Unmarshal(nSent[0], msg)
+	packet = &typedefs.Packet{}
+	err = proto.Unmarshal(nSent[0], packet)
 	require.NoError(t, err)
-	_, ok := msg.Operation.Op.(*typedefs.Message_ReadyInst)
+	rbcMessage, ok := packet.GetMessage().(*typedefs.Packet_RbcMessage)
+	require.True(t, ok, "Packet received should be a RBC message")
+	_, ok = rbcMessage.RbcMessage.GetOp().(*typedefs.RBCMessage_ReadyInst)
 	require.True(t, ok, "Message received should be a READY message")
 
 	received := iface.GetReceived()
 	// Should all have received a ready message
 	require.Equal(t, 1, len(received))
-	msg = &typedefs.Instruction{}
-	err = proto.Unmarshal(received[0], msg)
+	packet = &typedefs.Packet{}
+	err = proto.Unmarshal(received[0], packet)
 	require.NoError(t, err)
-	_, ok = msg.Operation.Op.(*typedefs.Message_ReadyInst)
+	rbcMessage, ok = packet.GetMessage().(*typedefs.Packet_RbcMessage)
+	require.True(t, ok, "Packet received should be a RBC message")
+	_, ok = rbcMessage.RbcMessage.GetOp().(*typedefs.RBCMessage_ReadyInst)
 	require.True(t, ok, "Message received should be a READY")
 
 	// Stop all
@@ -751,7 +802,7 @@ func TestFourRoundsRBC_SlowNodesStress(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	network := networking.NewFakeNetwork()
 
-	threshold := 4
+	threshold := 10
 	delay := time.Millisecond * 200
 
 	// Randomly generate the value to broadcast
@@ -795,8 +846,13 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start RBC from the dying dealer
-	inst := createProposeMessage(message)
-	out, err := proto.Marshal(inst)
+	proposeMessage := createProposeMessage(message)
+	packet := &typedefs.Packet{
+		Message: &typedefs.Packet_RbcMessage{
+			RbcMessage: proposeMessage,
+		},
+	}
+	out, err := proto.Marshal(packet)
 	require.NoError(t, err)
 
 	nodesAlive := nodes[1:]

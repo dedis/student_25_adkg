@@ -176,7 +176,8 @@ func setupNetwork(nbNodes int) (networking.Network, []networking.NetworkInterfac
 	return network, nodes, nil
 }
 
-func createNodes(network networking.Network, interfaces []networking.NetworkInterface, config Config) ([]*TestNode, error) {
+func createNodes(network networking.Network, interfaces []networking.NetworkInterface,
+	config Config) ([]*TestNode, error) {
 	nodes := make([]*TestNode, len(interfaces))
 	for i, iface := range interfaces {
 		rs := reedsolomon.NewBWCodes(config.t+1, config.n)
@@ -237,7 +238,7 @@ func TestAVSS_EndToEndSimple(t *testing.T) {
 	// Start AVSS
 	secret := conf.g.Scalar().SetInt64(int64(1))
 	dealer := nodes[0]
-	err = dealer.avss.Share(ctx, secret)
+	err = dealer.avss.Share(secret)
 	require.NoError(t, err)
 
 	wg := sync.WaitGroup{}
@@ -259,17 +260,4 @@ func TestAVSS_EndToEndSimple(t *testing.T) {
 	}
 
 	cancel()
-}
-
-// TestAVSS_EndToEndDelay test the protocol in a settings where the network
-// is slow. The protocol should still work although more slowly
-func TestAVSS_EndToEndDelay(t *testing.T) {
-	// TODO
-}
-
-// TestAVSS_EndToEndDyingNodes test the protocol in a setting where nodes in the
-// network die. As long as a threshold amount of nodes are still alive, the
-// protocol should still work
-func TestAVSS_EndToEndDyingNodes(t *testing.T) {
-	// TODO
 }

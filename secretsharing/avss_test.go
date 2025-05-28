@@ -193,7 +193,7 @@ func createNodes(network networking.Network, interfaces []networking.NetworkInte
 func startNodes(ctx context.Context, nodes []*TestNode) {
 	for _, node := range nodes {
 		go func() {
-			node.avss.start(ctx)
+			node.avss.Start(ctx)
 		}()
 	}
 }
@@ -207,12 +207,12 @@ func TestAVSS_EncodeDecodeCommitment(t *testing.T) {
 		v[i] = g.Point().Pick(g.RandomStream())
 	}
 
-	encodedCommitment, err := encodeCommitment(v)
+	encodedCommitment, err := marshalCommitment(v)
 	require.NoError(t, err)
 
 	require.Equal(t, len(encodedCommitment), len(v)*g.PointLen())
 
-	decodedCommitment, err := decodeCommitment(encodedCommitment, g)
+	decodedCommitment, err := unmarshalCommitment(encodedCommitment, g)
 	require.NoError(t, err)
 
 	require.Equal(t, len(v), len(decodedCommitment))
@@ -234,36 +234,30 @@ func TestAVSS_EndToEndSimple(t *testing.T) {
 
 	startNodes(ctx, nodes)
 
+	// Start AVSS
+	secret := conf.g.Scalar().SetInt64(int64(1))
+	dealer := nodes[0]
+	err = dealer.avss.Share(ctx, secret)
+	require.NoError(t, err)
+
 	wg := sync.WaitGroup{}
 	for _, node := range nodes {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			startErr := node.avss.Start(ctx)
-			require.NoError(t, startErr)
-		}()
-	}
-
-	// Start AVSS for all nodes
-	for i, node := range nodes {
-		secret := conf.g.Scalar().SetInt64(int64(i))
-		shareErr := node.avss.Share(ctx, secret)
-		require.NoError(t, shareErr)
-	}
-
-	for i, node := range nodes {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
 			<-node.avss.GetFinishedChannel()
-			expected := conf.g.Scalar().SetInt64(int64(i))
-			result := node.avss.result
-			require.True(t, expected.Equal(result))
 		}()
 	}
 
 	// Wait for all nodes to finish
 	wg.Wait()
+
+	// Check the results
+	for _, node := range nodes {
+		result := node.avss.result
+		require.True(t, secret.Equal(result))
+	}
+
 	cancel()
 }
 

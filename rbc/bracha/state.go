@@ -1,8 +1,12 @@
 package bracha
 
-import "sync"
+import (
+	"encoding/binary"
+	"sync"
+)
 
 type State struct {
+	instanceID uint32
 	echoCount  int
 	readyCount int
 	sentReady  bool
@@ -12,8 +16,8 @@ type State struct {
 	sync.RWMutex
 }
 
-func NewState() *State {
-	return &State{}
+func NewState(instanceID uint32) *State {
+	return &State{instanceID: instanceID}
 }
 
 func (s *State) EchoCount() int {
@@ -22,19 +26,19 @@ func (s *State) EchoCount() int {
 	return s.echoCount
 }
 
-func (s *State) ReadyCount() int {
-	s.RLock()
-	defer s.RUnlock()
-	return s.readyCount
-}
-
 func (s *State) SentReady() bool {
 	s.RLock()
 	defer s.RUnlock()
 	return s.sentReady
 }
 
-func (s *State) Value() bool {
+func (s *State) Identifier() []byte {
+	bs := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bs, s.instanceID)
+	return bs
+}
+
+func (s *State) GetValue() bool {
 	s.RLock()
 	defer s.RUnlock()
 	return s.value

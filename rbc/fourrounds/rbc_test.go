@@ -585,7 +585,7 @@ func checkRBCResult(t *testing.T, nodes []*TestNode, msg, msgHash []byte) {
 		state, ok := node.rbc.GetState(msgHash)
 		require.True(t, ok)
 		require.True(t, state.Finished())
-		val := state.FinalValue()
+		val := state.GetValue()
 		require.True(t, len(msg) == len(val))
 		require.True(t, bytes.Equal(msg, val))
 	}

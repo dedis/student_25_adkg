@@ -59,9 +59,9 @@ func waitForResult(ctx context.Context, t require.TestingT, nodes []*TestNode,
 					require.False(t, expectSuccess)
 					wg.Done()
 					return
-				case state, ok := <-node.rbc.GetFinishChannel():
+				case state, ok := <-node.rbc.GetFinishedChannel():
 					require.True(t, ok)
-					if bytes.Equal(state.messageHash, messageHash) {
+					if bytes.Equal(state.Identifier(), messageHash) {
 						require.Equal(t, expectSuccess, state.Success())
 						wg.Done()
 						return

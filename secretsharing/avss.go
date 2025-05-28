@@ -309,14 +309,14 @@ func (a *AVSS) start(ctx context.Context) error {
 			a.logger.Error().Err(err).Msg("error receiving message")
 			continue
 		}
-		msg := &typedefs.Instruction{}
+		msg := &typedefs.Packet{}
 		err = proto.Unmarshal(bs, msg)
 		if err != nil {
 			a.logger.Error().Err(err).Msg("error decoding message")
 			continue
 		}
 
-		ssMessage, ok := msg.GetOp().(*typedefs.Instruction_SsMessageInst)
+		ssMessage, ok := msg.GetMessage().(*typedefs.Packet_SsMessageInst)
 		if !ok {
 			continue
 		}
@@ -459,8 +459,8 @@ func createReconstructMessage(si, ri []byte) *typedefs.SSMessage {
 }
 
 func (a *AVSS) broadcastMessage(message *typedefs.SSMessage) error {
-	avssInstruction := &typedefs.Instruction_SsMessageInst{SsMessageInst: message}
-	instruction := &typedefs.Instruction{Op: avssInstruction}
+	avssInstruction := &typedefs.Packet_SsMessageInst{SsMessageInst: message}
+	instruction := &typedefs.Packet{Message: avssInstruction}
 	out, err := proto.Marshal(instruction)
 	if err != nil {
 		return err

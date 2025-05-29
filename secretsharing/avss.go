@@ -6,7 +6,6 @@ import (
 	"student_25_adkg/logging"
 	"student_25_adkg/pedersencommitment"
 	"student_25_adkg/rbc"
-	"student_25_adkg/rbc/fourrounds"
 	"student_25_adkg/typedefs"
 	"sync"
 
@@ -59,7 +58,7 @@ type Deal struct {
 	rShare *share.PriShare
 }
 
-func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc *fourrounds.FourRoundRBC) *AVSS {
+func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc rbc.RBC[[]byte]) *AVSS {
 	registerPointAndScalarProtobufInterfaces(conf.g)
 	return &AVSS{
 		conf:          conf,

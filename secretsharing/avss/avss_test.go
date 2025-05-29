@@ -1,4 +1,4 @@
-package secretsharing
+package avss
 
 import (
 	"context"

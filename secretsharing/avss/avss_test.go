@@ -3,6 +3,7 @@ package avss
 import (
 	"context"
 	"student_25_adkg/networking"
+	"student_25_adkg/secretsharing"
 	test "student_25_adkg/testing"
 	"sync"
 	"testing"
@@ -14,18 +15,18 @@ import (
 
 var defaultThreshold = 2
 
-func getDefaultConfig() Config {
+func getDefaultConfig() secretsharing.Config {
 	g := edwards25519.NewBlakeSHA256Ed25519()
 	offset := g.Scalar().Pick(g.RandomStream())
 	g0 := g.Point().Base()
 	g1 := g0.Mul(offset, g0)
 
-	return Config{
-		g:  g,
-		g0: g0,
-		g1: g1,
-		t:  defaultThreshold,
-		n:  3*defaultThreshold + 1,
+	return secretsharing.Config{
+		Group:     g,
+		Base0:     g0,
+		Base1:     g1,
+		Threshold: defaultThreshold,
+		NbNodes:   3*defaultThreshold + 1,
 	}
 }
 
@@ -35,7 +36,7 @@ type TestNode struct {
 	rbc   *test.MockRBC
 }
 
-func NewTestNode(iface networking.NetworkInterface, conf Config, nodeID int64, mockRbc *test.MockRBC) *TestNode {
+func NewTestNode(iface networking.NetworkInterface, conf secretsharing.Config, nodeID int64, mockRbc *test.MockRBC) *TestNode {
 	avss := NewAVSS(conf, nodeID, iface, mockRbc)
 	mockRbc.SetPredicate(avss.predicate)
 	return &TestNode{
@@ -46,7 +47,7 @@ func NewTestNode(iface networking.NetworkInterface, conf Config, nodeID int64, m
 }
 
 func createNodes(interfacesAvss, interfacesRbc []networking.NetworkInterface,
-	config Config) []*TestNode {
+	config secretsharing.Config) []*TestNode {
 	nodes := make([]*TestNode, len(interfacesAvss))
 	for i, iface := range interfacesAvss {
 		rbcInstance := test.NewMockRBC(interfacesRbc[i], nil)
@@ -92,9 +93,9 @@ func TestAVSS_EndToEndSimple(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create separate networks for the RBC and AVSS communications
-	_, interfacesAvss, err := test.SetupNetwork(conf.n)
+	interfacesAvss, err := test.SetupNetwork(networking.NewFakeNetwork(), conf.NbNodes)
 	require.NoError(t, err)
-	_, interfacesRbc, err := test.SetupNetwork(conf.n)
+	interfacesRbc, err := test.SetupNetwork(networking.NewFakeNetwork(), conf.NbNodes)
 	require.NoError(t, err)
 
 	nodes := createNodes(interfacesAvss, interfacesRbc, conf)
@@ -102,7 +103,7 @@ func TestAVSS_EndToEndSimple(t *testing.T) {
 	startNodes(ctx, nodes)
 
 	// Start AVSS
-	secret := conf.g.Scalar().SetInt64(int64(1))
+	secret := conf.Group.Scalar().SetInt64(int64(1))
 	dealer := nodes[0]
 	err = dealer.avss.Share(secret)
 	require.NoError(t, err)

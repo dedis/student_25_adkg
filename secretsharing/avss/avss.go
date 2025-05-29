@@ -6,6 +6,7 @@ import (
 	"student_25_adkg/logging"
 	"student_25_adkg/pedersencommitment"
 	"student_25_adkg/rbc"
+	"student_25_adkg/secretsharing"
 	"student_25_adkg/typedefs"
 	"sync"
 
@@ -20,17 +21,9 @@ import (
 
 var ErrWrongPhase = errors.New("wrong phase")
 
-type Config struct {
-	g  kyber.Group
-	g0 kyber.Point
-	g1 kyber.Point
-	t  int
-	n  int
-}
-
 type AVSS struct {
 	nodeID        int64
-	conf          Config
+	conf          secretsharing.Config
 	iface         rbc.AuthenticatedMessageStream
 	rbc           rbc.RBC[[]byte]
 	logger        zerolog.Logger
@@ -58,8 +51,8 @@ type Deal struct {
 	rShare *share.PriShare
 }
 
-func NewAVSS(conf Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc rbc.RBC[[]byte]) *AVSS {
-	registerPointAndScalarProtobufInterfaces(conf.g)
+func NewAVSS(conf secretsharing.Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc rbc.RBC[[]byte]) *AVSS {
+	registerPointAndScalarProtobufInterfaces(conf.Group)
 	return &AVSS{
 		conf:          conf,
 		logger:        logging.GetLogger(nodeID),
@@ -145,11 +138,11 @@ func unmarshalShares(sBytes, rBytes []byte) (sShare, rShare *share.PriShare, err
 
 // verifyDeal verifies that it belongs to the given Pedersen commitment. Returns true if
 // pedersencommitment.PedPolyVerify returns true, otherwise false.
-func verifyDeal(deal *Deal, commitment []kyber.Point, config Config) bool {
+func verifyDeal(deal *Deal, commitment []kyber.Point, config secretsharing.Config) bool {
 	sShare := deal.sShare
 	rShare := deal.rShare
 	index := int64(deal.sShare.I)
-	ok := pedersencommitment.PedPolyVerify(commitment, index, sShare, rShare, config.g, config.g0, config.g1)
+	ok := pedersencommitment.PedPolyVerify(commitment, index, sShare, rShare, config.Group, config.Base0, config.Base1)
 	return ok
 }
 
@@ -157,7 +150,7 @@ func verifyDeal(deal *Deal, commitment []kyber.Point, config Config) bool {
 // is correct. Refer to https://eprint.iacr.org/2021/777.pdf, algorithm 5. Returns
 // true if the commitment can be correctly unmarshalled and passes pedersencommitment.PedPolyVerify
 func (a *AVSS) predicate(bs []byte) bool {
-	commitment, err := unmarshalCommitment(bs, a.conf.g)
+	commitment, err := unmarshalCommitment(bs, a.conf.Group)
 	if err != nil {
 		return false
 	}
@@ -172,7 +165,7 @@ func (a *AVSS) predicate(bs []byte) bool {
 func (a *AVSS) sendShares(sShares, rShares []*share.PriShare) error {
 	sSharesBytes := make([][]byte, len(sShares))
 	rSharesBytes := make([][]byte, len(rShares))
-	for i := 0; i < a.conf.n; i++ {
+	for i := 0; i < a.conf.NbNodes; i++ {
 		sBytes, rBytes, err := marshalShares(sShares[i], rShares[i])
 		if err != nil {
 			return err
@@ -236,7 +229,7 @@ func (a *AVSS) initiateReconstruction(state rbc.Instance[[]byte]) {
 	}
 	a.phase = RECONSTRUCTION
 
-	commitment, err := unmarshalCommitment(state.GetValue(), a.conf.g)
+	commitment, err := unmarshalCommitment(state.GetValue(), a.conf.Group)
 	if err != nil {
 		return
 	}
@@ -264,9 +257,9 @@ func (a *AVSS) initiateReconstruction(state rbc.Instance[[]byte]) {
 // and the RBC broadcast has been initiated (not finished!).
 func (a *AVSS) Share(s kyber.Scalar) error {
 	// Randomly sample a polynomial s.t. the origin is at s
-	p := share.NewPriPoly(a.conf.g, a.conf.t, s, random.New())
-	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, a.conf.t,
-		a.conf.n, a.conf.g, a.conf.g0, a.conf.g1)
+	p := share.NewPriPoly(a.conf.Group, a.conf.Threshold, s, random.New())
+	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, a.conf.Threshold,
+		a.conf.NbNodes, a.conf.Group, a.conf.Base0, a.conf.Base1)
 	if err != nil {
 		return err
 	}
@@ -401,7 +394,7 @@ func (a *AVSS) receiveReconstruct(receiveMessage *typedefs.SSMessage_Reconstruct
 	}
 
 	a.shares = append(a.shares, sShare)
-	if len(a.shares) < a.conf.t+1 {
+	if len(a.shares) < a.conf.Threshold+1 {
 		return nil
 	}
 
@@ -432,7 +425,7 @@ func (a *AVSS) reconstruct() (kyber.Scalar, error) {
 	}
 
 	// Linear interpolation to get the polynomial
-	poly, err := share.RecoverPriPoly(a.conf.g, a.shares, a.conf.t, a.conf.n)
+	poly, err := share.RecoverPriPoly(a.conf.Group, a.shares, a.conf.Threshold, a.conf.NbNodes)
 	if err != nil {
 		return nil, err
 	}

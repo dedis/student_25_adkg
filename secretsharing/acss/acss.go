@@ -75,6 +75,9 @@ func (a *ACSS) Share(secret kyber.Scalar) (*Instance, error) {
 	}
 
 	rbcPayload, err := proto.Marshal(rbcPayloadMessage)
+	if err != nil {
+		return nil, err
+	}
 
 	rbcInstance, err := a.rbc.RBroadcast(rbcPayload)
 	if err != nil {
@@ -161,7 +164,8 @@ func (a *ACSS) predicate(payload []byte) bool {
 // verifyPedersenCommit allows to more easily verify a commitment or shares without having to write
 // the full method with the config that will be the same for every call
 func (a *ACSS) verifyPedersenCommit(commit []kyber.Point, sShare, rShare *share.PriShare) bool {
-	return pedersencommitment.PedPolyVerify(commit, int64(sShare.I), sShare, rShare, a.config.Group, a.config.Base0, a.config.Base1)
+	return pedersencommitment.PedPolyVerify(commit, int64(sShare.I), sShare, rShare,
+		a.config.Group, a.config.Base0, a.config.Base1)
 }
 
 // encryptShares encrypt the given set of share.Prishare into bytes by marshalling each
@@ -180,9 +184,15 @@ func (a *ACSS) encryptShares(sShares, rShares []*share.PriShare) ([][]byte, erro
 
 		// Encrypt si & ri
 		siBytes, riBytes, err := secretsharing.MarshalShares(si, ri)
+		if err != nil {
+			return nil, err
+		}
 		toEncrypt := append(siBytes, riBytes...)
 
 		encrypted, err := ecies.Encrypt(a.config.Group, pki, toEncrypt, sha256.New)
+		if err != nil {
+			return nil, err
+		}
 		encryptedShares[i] = encrypted
 	}
 
@@ -228,8 +238,12 @@ func (a *ACSS) handleFinishedRBC(state rbc.Instance[[]byte]) {
 
 // parseRBCPayload returns the commit and the shares marshalled into the RBC payload used by ACSS. Return an
 // error if the payload can not be parsed.
-func (a *ACSS) parseRBCPayload(payload *typedefs.ACSSMessage_RBCPayload) ([]kyber.Point, *share.PriShare, *share.PriShare, error) {
+func (a *ACSS) parseRBCPayload(payload *typedefs.ACSSMessage_RBCPayload) ([]kyber.Point, *share.PriShare,
+	*share.PriShare, error) {
 	commit, err := secretsharing.UnmarshalCommitment(payload.GetCommitment(), a.config.Group)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	encryptedShare := payload.GetEncryptedShares()[a.nodeIndex]
 
@@ -251,7 +265,8 @@ func (a *ACSS) parseRBCPayload(payload *typedefs.ACSSMessage_RBCPayload) ([]kybe
 
 // createRBCPayload embeds a Pedersen commitment and its encrypted shares into an RBC payload. Returns an error
 // if marshalling failed.
-func (a *ACSS) createRBCPayload(commitment []kyber.Point, encryptedShares [][]byte) (*typedefs.ACSSMessage_RBCPayload, error) {
+func (a *ACSS) createRBCPayload(commitment []kyber.Point,
+	encryptedShares [][]byte) (*typedefs.ACSSMessage_RBCPayload, error) {
 	marshalledCommitment, err := secretsharing.MarshalCommitment(commitment)
 	if err != nil {
 		return nil, err

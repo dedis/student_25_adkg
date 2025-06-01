@@ -13,10 +13,11 @@ import (
 )
 
 type Instance struct {
-	finished bool
-	success  bool
-	value    []byte
-	hash     []byte
+	finished        bool
+	success         bool
+	value           []byte
+	hash            []byte
+	predicatePassed bool
 	sync.RWMutex
 }
 
@@ -48,6 +49,18 @@ func (i *Instance) Success() bool {
 	i.RLock()
 	defer i.RUnlock()
 	return i.success
+}
+
+func (i *Instance) PredicatePassed() bool {
+	i.RLock()
+	defer i.RUnlock()
+	return i.predicatePassed
+}
+
+func (i *Instance) SetPredicatePassed() {
+	i.Lock()
+	defer i.Unlock()
+	i.predicatePassed = true
 }
 
 func (i *Instance) Finish(value []byte) bool {
@@ -87,8 +100,25 @@ func (m *MockRBC) SetPredicate(predicate func([]byte) bool) {
 	m.predicate = predicate
 }
 
-func (m *MockRBC) RBroadcast(msg []byte) error {
-	return m.iface.Broadcast(msg)
+func (m *MockRBC) getOrCreateInstance(hash []byte) *Instance {
+	state, ok := m.states[string(hash)]
+	if ok {
+		return state
+	}
+	state = NewInstance(hash)
+	m.states[string(hash)] = state
+	return state
+}
+
+func (m *MockRBC) RBroadcast(msg []byte) (rbc.Instance[[]byte], error) {
+	m.Lock()
+	defer m.Unlock()
+	hasher := sha256.New()
+	hasher.Write(msg)
+	hash := hasher.Sum(nil)
+	state := m.getOrCreateInstance(hash)
+
+	return state, m.iface.Broadcast(msg)
 }
 
 func (m *MockRBC) Listen(ctx context.Context) error {
@@ -113,11 +143,7 @@ func (m *MockRBC) Listen(ctx context.Context) error {
 		hasher.Write(msg)
 		hash := hasher.Sum(nil)
 
-		state, ok := m.states[string(hash)]
-		if !ok {
-			state = NewInstance(hash)
-			m.states[string(hash)] = state
-		}
+		state := m.getOrCreateInstance(hash)
 
 		_ = state.Finish(msg)
 		m.finishedChan <- state

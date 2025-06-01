@@ -34,6 +34,11 @@ func registerPointAndScalarProtobufInterfaces(g kyber.Group) {
 	})
 }
 
+func TestMain(m *testing.M) {
+	g := edwards25519.NewBlakeSHA256Ed25519()
+	registerPointAndScalarProtobufInterfaces(g)
+}
+
 var defaultThreshold = 2
 
 func getDefaultConfig() secretsharing.Config {
@@ -175,7 +180,6 @@ func TestACSS_SecretDistribution(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	config := getDefaultConfig()
-	registerPointAndScalarProtobufInterfaces(config.Group)
 
 	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
@@ -240,7 +244,6 @@ func TestACSS_ShareVerification(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	config := getDefaultConfig()
-	registerPointAndScalarProtobufInterfaces(config.Group)
 
 	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
@@ -335,7 +338,6 @@ func TestACSS_SecretReconstruction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	config := getDefaultConfig()
-	registerPointAndScalarProtobufInterfaces(config.Group)
 
 	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
@@ -412,7 +414,6 @@ func TestACSS_FullSharePhase(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	config := getDefaultConfig()
-	registerPointAndScalarProtobufInterfaces(config.Group)
 
 	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
@@ -453,7 +454,6 @@ func TestACSS_SendReconstructMessage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	config := getDefaultConfig()
-	registerPointAndScalarProtobufInterfaces(config.Group)
 
 	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
@@ -527,7 +527,6 @@ func TestACSS_AllReconstruct(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	config := getDefaultConfig()
-	registerPointAndScalarProtobufInterfaces(config.Group)
 
 	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
@@ -590,7 +589,6 @@ func TestACSS_ThresholdReconstruct(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	config := getDefaultConfig()
-	registerPointAndScalarProtobufInterfaces(config.Group)
 
 	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
@@ -671,7 +669,6 @@ func TestACSS_ShareAndReconstruct(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	config := getDefaultConfig()
-	registerPointAndScalarProtobufInterfaces(config.Group)
 
 	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
@@ -703,58 +700,4 @@ func TestACSS_ShareAndReconstruct(t *testing.T) {
 	checkReconstruction(t, nodes, instance.Identifier(), secret, true, true)
 
 	cancel()
-}
-
-// ******** Asynchronous & Fault Tolerance ********
-
-// TestACSS_WithDelayedMessages test that the protocol handles out-of-order or delayed messages gracefully.
-// Expect that the secret is still correctly reconstructed.
-func TestACSS_WithDelayedMessages(t *testing.T) {
-	require.Fail(t, "TODO")
-}
-
-// TestACSS_WithDroppedMessages test that the protocol is robust to dropped messages (some shares never arrive).
-// Expect that as long as the threshold is met, reconstruction still works.
-func TestACSS_WithDroppedMessages(t *testing.T) {
-	require.Fail(t, "TODO")
-}
-
-// TestACSS_WithByzantineParticipants test the behavior when some participants send incorrect or malformed shares.
-// Expect that the malicious shares are detected and ignored; reconstruction still succeeds if quorum is honest.
-func TestACSS_WithByzantineParticipants(t *testing.T) {
-	require.Fail(t, "TODO")
-}
-
-// ******** Security & Consistency ********
-
-// TestACSS_ShareUniqueness test that each participant receives a unique share.
-// Expect that no two participants receive the same share.
-func TestACSS_ShareUniqueness(t *testing.T) {
-	require.Fail(t, "TODO")
-}
-
-// TestACSS_ConsistencyAmongParticipants test that all honest participants reconstruct the same secret.
-// Expect an identical output among all honest nodes.
-func TestACSS_ConsistencyAmongParticipants(t *testing.T) {
-	require.Fail(t, "TODO")
-}
-
-// ******** Edge Cases & Limits ********
-
-// TestACSS_EmptySecret test the behavior when trying to share an empty secret.
-// Expect that the protocol handles it without crashing, possibly erroring gracefully.
-func TestACSS_EmptySecret(t *testing.T) {
-	require.Fail(t, "TODO")
-}
-
-// TestACSS_Stress test the behavior when running with a large network of users.
-// Expect that the algorithm still performs correctly under load
-func TestACSS_Stress(t *testing.T) {
-	require.Fail(t, "TODO")
-}
-
-// TestACSS_InvalidParameters test the rejection of invalid inputs (e.g., threshold > number of participants).
-// Expect a proper error handling or panic with a clear message.
-func TestACSS_InvalidParameters(t *testing.T) {
-	require.Fail(t, "TODO")
 }

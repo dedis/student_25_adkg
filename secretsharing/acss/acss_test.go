@@ -34,7 +34,7 @@ func registerPointAndScalarProtobufInterfaces(g kyber.Group) {
 	})
 }
 
-func TestMain(m *testing.M) {
+func TestMain(_ *testing.M) {
 	g := edwards25519.NewBlakeSHA256Ed25519()
 	registerPointAndScalarProtobufInterfaces(g)
 }
@@ -121,11 +121,11 @@ func createTestNodes(interfaces, rbcInterfaces []networking.NetworkInterface, ks
 	return nodes
 }
 
-func setupTest(config secretsharing.Config) (acssNetwork, rbcNetwork networking.Network, acssIfaces,
-	rbcIfaces []networking.NetworkInterface, ks KeyStore, pks map[int64]kyber.Scalar) {
+func setupTest(config secretsharing.Config) (acssIfaces, rbcIfaces []networking.NetworkInterface,
+	ks KeyStore, pks map[int64]kyber.Scalar) {
 	// Create two different networks for RBC and ACSS
 	network := networking.NewFakeNetwork()
-	rbcNetwork = networking.NewFakeNetwork()
+	rbcNetwork := networking.NewFakeNetwork()
 
 	interfaces, err := test.SetupNetwork(network, config.NbNodes)
 	if err != nil {
@@ -139,7 +139,7 @@ func setupTest(config secretsharing.Config) (acssNetwork, rbcNetwork networking.
 	// Setup Key store
 	ks, pks = generateKeyStore(interfaces, config.Group)
 
-	return network, rbcNetwork, interfaces, rbcInterfaces, ks, pks
+	return interfaces, rbcInterfaces, ks, pks
 }
 
 func startNodes(ctx context.Context, t require.TestingT, nodes []*TestNode, expectedErr error) {
@@ -181,7 +181,7 @@ func TestACSS_SecretDistribution(t *testing.T) {
 
 	config := getDefaultConfig()
 
-	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	// Set up the test node
 	rbc := test.NewMockRBC(rbcInterfaces[0], nil)
@@ -245,7 +245,7 @@ func TestACSS_ShareVerification(t *testing.T) {
 
 	config := getDefaultConfig()
 
-	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	// Set up the test node
 	rbc := test.NewMockRBC(rbcInterfaces[0], nil)
@@ -339,7 +339,7 @@ func TestACSS_SecretReconstruction(t *testing.T) {
 
 	config := getDefaultConfig()
 
-	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	// Set up the test node
 	rbc := test.NewMockRBC(rbcInterfaces[0], nil)
@@ -394,6 +394,7 @@ func TestACSS_SecretReconstruction(t *testing.T) {
 		rShare := decryptedShare[len(decryptedShare)/2:]
 
 		si, _, err := secretsharing.UnmarshalShares(sShare, rShare)
+		require.NoError(t, err)
 
 		secretShares = append(secretShares, si)
 	}
@@ -415,7 +416,7 @@ func TestACSS_FullSharePhase(t *testing.T) {
 
 	config := getDefaultConfig()
 
-	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
 
@@ -455,7 +456,7 @@ func TestACSS_SendReconstructMessage(t *testing.T) {
 
 	config := getDefaultConfig()
 
-	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
 
@@ -466,6 +467,7 @@ func TestACSS_SendReconstructMessage(t *testing.T) {
 	p := share.NewPriPoly(config.Group, config.Threshold, secret, random.New())
 	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, config.Threshold,
 		config.NbNodes, config.Group, config.Base0, config.Base1)
+	require.NoError(t, err)
 
 	encryptedShares, err := dealer.acss.encryptShares(sShares, rShares)
 	require.NoError(t, err)
@@ -474,6 +476,7 @@ func TestACSS_SendReconstructMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	rbcPayload, err := proto.Marshal(rbcPayloadMessage)
+	require.NoError(t, err)
 
 	// Compute the hash of the payload to be able to identify RBC messages for this instance
 	hasher := sha256.New()
@@ -528,7 +531,7 @@ func TestACSS_AllReconstruct(t *testing.T) {
 
 	config := getDefaultConfig()
 
-	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
 
@@ -539,6 +542,7 @@ func TestACSS_AllReconstruct(t *testing.T) {
 	p := share.NewPriPoly(config.Group, config.Threshold, secret, random.New())
 	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, config.Threshold,
 		config.NbNodes, config.Group, config.Base0, config.Base1)
+	require.NoError(t, err)
 
 	encryptedShares, err := dealer.acss.encryptShares(sShares, rShares)
 	require.NoError(t, err)
@@ -547,6 +551,7 @@ func TestACSS_AllReconstruct(t *testing.T) {
 	require.NoError(t, err)
 
 	rbcPayload, err := proto.Marshal(rbcPayloadMessage)
+	require.NoError(t, err)
 
 	// Compute the hash of the payload to be able to identify RBC messages for this instance
 	hasher := sha256.New()
@@ -590,7 +595,7 @@ func TestACSS_ThresholdReconstruct(t *testing.T) {
 
 	config := getDefaultConfig()
 
-	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
 
@@ -601,6 +606,7 @@ func TestACSS_ThresholdReconstruct(t *testing.T) {
 	p := share.NewPriPoly(config.Group, config.Threshold, secret, random.New())
 	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, config.Threshold,
 		config.NbNodes, config.Group, config.Base0, config.Base1)
+	require.NoError(t, err)
 
 	encryptedShares, err := dealer.acss.encryptShares(sShares, rShares)
 	require.NoError(t, err)
@@ -609,6 +615,7 @@ func TestACSS_ThresholdReconstruct(t *testing.T) {
 	require.NoError(t, err)
 
 	rbcPayload, err := proto.Marshal(rbcPayloadMessage)
+	require.NoError(t, err)
 
 	// Compute the hash of the payload to be able to identify RBC messages for this instance
 	hasher := sha256.New()
@@ -670,7 +677,7 @@ func TestACSS_ShareAndReconstruct(t *testing.T) {
 
 	config := getDefaultConfig()
 
-	_, _, acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
 

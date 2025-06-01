@@ -51,7 +51,8 @@ type Deal struct {
 	rShare *share.PriShare
 }
 
-func NewAVSS(conf secretsharing.Config, nodeID int64, stream rbc.AuthenticatedMessageStream, rbc rbc.RBC[[]byte]) *AVSS {
+func NewAVSS(conf secretsharing.Config, nodeID int64, stream rbc.AuthenticatedMessageStream,
+	rbc rbc.RBC[[]byte]) *AVSS {
 	registerPointAndScalarProtobufInterfaces(conf.Group)
 	return &AVSS{
 		conf:          conf,

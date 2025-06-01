@@ -36,7 +36,8 @@ type TestNode struct {
 	rbc   *test.MockRBC
 }
 
-func NewTestNode(iface networking.NetworkInterface, conf secretsharing.Config, nodeID int64, mockRbc *test.MockRBC) *TestNode {
+func NewTestNode(iface networking.NetworkInterface, conf secretsharing.Config, nodeID int64,
+	mockRbc *test.MockRBC) *TestNode {
 	avss := NewAVSS(conf, nodeID, iface, mockRbc)
 	mockRbc.SetPredicate(avss.predicate)
 	return &TestNode{

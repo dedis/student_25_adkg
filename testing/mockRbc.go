@@ -102,6 +102,7 @@ func (m *MockRBC) Listen(ctx context.Context) error {
 		}
 
 		if !m.predicate(msg) {
+			m.logger.Error().Err(err).Msg("message did not pass predicate")
 			return rbc.ErrPredicateRejected
 		}
 

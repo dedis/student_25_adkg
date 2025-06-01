@@ -37,14 +37,40 @@ message SSMessage{
   }
 
   oneof op{
-    SSMessage.Share share_inst=3;
-    SSMessage.Reconstruct reconstruct_inst=4;
+    SSMessage.Share share_inst=1;
+    SSMessage.Reconstruct reconstruct_inst=2;
   }
+}
+
+message ACSSMessage {
+  message RBCPayload {
+    repeated bytes encryptedShares=1;
+    bytes commitment=2;
+  }
+
+  message Implicate {
+    int64 index=1;
+    bytes secretKey=2;
+  }
+
+  message Recover {
+    int64 index=1;
+    bytes secretKey=2;
+  }
+
+  oneof op{
+    Implicate implicate_inst=1;
+    Recover recover_inst=2;
+    SSMessage.Reconstruct reconstruct_inst=3;
+  }
+  bytes instanceIdentifier=4;
+
 }
 
 message Packet {
   oneof message {
     RBCMessage rbcMessage=1;
     SSMessage ss_message_inst=2;
+    ACSSMessage acssMessage=3;
   }
 }

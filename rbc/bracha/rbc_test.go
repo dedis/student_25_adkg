@@ -79,7 +79,7 @@ func runRBCWithValue(t *testing.T, val bool) {
 
 	// Start RBC
 	dealer := nodes[0]
-	err := dealer.rbc.RBroadcast(val)
+	_, err := dealer.rbc.RBroadcast(val)
 	t.Log("Broadcast complete")
 	require.NoError(t, err)
 

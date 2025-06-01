@@ -30,12 +30,15 @@ type Instance[T any] interface {
 	Success() bool
 	GetValue() T
 	Identifier() []byte
+	PredicatePassed() bool
 }
 
 // RBC is an interface for an RBC protocol
 type RBC[T any] interface {
-	// RBroadcast broadcasts the given value and returns.
-	RBroadcast(T) error
+	// RBroadcast broadcasts the given value and returns the Instance created
+	// as a result. Returns before the protocol finishes. Returns an error if
+	// an instance associated with the hash of the given message already exists.
+	RBroadcast(T) (Instance[T], error)
 	// Listen makes the node listen to the network for RBC messages. This method returns only
 	// when the context is stopped or its deadline exceeded returning any of the two errors.
 	Listen(ctx context.Context) error

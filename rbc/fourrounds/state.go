@@ -6,28 +6,30 @@ import (
 )
 
 type State struct {
-	sentReady   bool
-	echoCount   int
-	readyCount  int
-	readyShares map[*reedsolomon.Encoding]struct{}
-	finalValue  []byte
-	finished    bool
-	success     bool
-	messageHash []byte
+	sentReady       bool
+	echoCount       int
+	readyCount      int
+	readyShares     map[*reedsolomon.Encoding]struct{}
+	finalValue      []byte
+	finished        bool
+	success         bool
+	messageHash     []byte
+	passedPredicate bool
 	sync.RWMutex
 }
 
 func NewState(messageHash []byte) *State {
 	return &State{
-		sentReady:   false,
-		echoCount:   0,
-		readyCount:  0,
-		readyShares: make(map[*reedsolomon.Encoding]struct{}),
-		finalValue:  nil,
-		finished:    false,
-		success:     false,
-		messageHash: messageHash,
-		RWMutex:     sync.RWMutex{},
+		sentReady:       false,
+		echoCount:       0,
+		readyCount:      0,
+		readyShares:     make(map[*reedsolomon.Encoding]struct{}),
+		finalValue:      nil,
+		finished:        false,
+		success:         false,
+		passedPredicate: false,
+		messageHash:     messageHash,
+		RWMutex:         sync.RWMutex{},
 	}
 }
 
@@ -79,6 +81,18 @@ func (s *State) Identifier() []byte {
 	s.RLock()
 	defer s.RUnlock()
 	return s.messageHash
+}
+
+func (s *State) PredicatePassed() bool {
+	s.RLock()
+	defer s.RUnlock()
+	return s.passedPredicate
+}
+
+func (s *State) SetPredicatePassed() {
+	s.Lock()
+	defer s.Unlock()
+	s.passedPredicate = true
 }
 
 // SetSentReady set the sentReady variable to true and returns

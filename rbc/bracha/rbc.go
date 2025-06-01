@@ -44,10 +44,10 @@ func (b *RBC) sendMsg(msg *Message) error {
 }
 
 // RBroadcast implements the method from the RBC interface
-func (b *RBC) RBroadcast(content bool) error {
+func (b *RBC) RBroadcast(content bool) (rbc.Instance[bool], error) {
 	msg := NewBrachaMessage(PROPOSE, content)
 	err := b.sendMsg(msg)
-	return err
+	return b.state, err
 }
 
 // Listen listens for packets on the interface and handles them. Run until the context

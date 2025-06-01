@@ -16,6 +16,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+var ErrInstanceAlreadyExists = errors.New("instance already exists")
+
 type FourRoundRBC struct {
 	iface     rbc.AuthenticatedMessageStream
 	predicate func([]byte) bool
@@ -48,6 +50,8 @@ func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
 }
 
 func (f *FourRoundRBC) FreshHash(bs []byte) ([]byte, error) {
+	f.Lock()
+	defer f.Unlock()
 	f.Hash.Reset()
 
 	// Write the bytes
@@ -59,11 +63,20 @@ func (f *FourRoundRBC) FreshHash(bs []byte) ([]byte, error) {
 	return h, nil
 }
 
-func (f *FourRoundRBC) RBroadcast(message []byte) error {
+func (f *FourRoundRBC) RBroadcast(message []byte) (rbc.Instance[[]byte], error) {
+	messageHash, err := f.FreshHash(message)
+	if err != nil {
+		return nil, err
+	}
+	newState, created := f.getOrCreateState(messageHash)
+	if !created {
+		f.log.Error().Msg("Received propose message for an already used message hash")
+		return nil, ErrInstanceAlreadyExists
+	}
 	// Send the broadcast
 	inst := createProposeMessage(message)
-	err := f.broadcastMessage(inst)
-	return err
+	err = f.broadcastMessage(inst)
+	return newState, err
 }
 
 // Listen starts listening to incoming messages from the network and handles
@@ -138,6 +151,9 @@ func (f *FourRoundRBC) receivePropose(msg *typedefs.RBCMessage_Propose) error {
 		return err
 	}
 
+	state, _ := f.getOrCreateState(h)
+	state.SetPredicatePassed()
+
 	// Encode to have a share to send for each node
 	padded := padMessage(msg.GetContent(), f.threshold+1)
 	encodings, err := f.rs.Encode(padded)
@@ -186,19 +202,19 @@ func removePadding(msg []byte, k int) ([]byte, error) {
 	return msg[:len(msg)-paddingLength], nil
 }
 
-func (f *FourRoundRBC) getOrCreateState(messageHash []byte) *State {
+func (f *FourRoundRBC) getOrCreateState(messageHash []byte) (*State, bool) {
 	f.Lock()
 	defer f.Unlock()
 	if state, ok := f.states[string(messageHash)]; ok {
-		return state
+		return state, false
 	}
 	state := NewState(messageHash)
 	f.states[string(messageHash)] = state
-	return state
+	return state, true
 }
 
 func (f *FourRoundRBC) receiveEcho(msg *typedefs.RBCMessage_Echo) error {
-	state := f.getOrCreateState(msg.GetMessageHash())
+	state, _ := f.getOrCreateState(msg.GetMessageHash())
 
 	echoCount := state.IncrementEchoCount()
 
@@ -229,7 +245,7 @@ func (f *FourRoundRBC) receiveEcho(msg *typedefs.RBCMessage_Echo) error {
 }
 
 func (f *FourRoundRBC) receiveReady(msg *typedefs.RBCMessage_Ready) error {
-	state := f.getOrCreateState(msg.GetMessageHash())
+	state, _ := f.getOrCreateState(msg.GetMessageHash())
 
 	readyCount := state.IncrementReadyCount()
 	echoCount := state.EchoCount()

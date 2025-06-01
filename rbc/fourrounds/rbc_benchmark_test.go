@@ -95,7 +95,7 @@ func Benchmark_Threshold20(b *testing.B) {
 
 		wg := waitForResult(ctx, b, nodes, hash, true)
 		// Start RBC
-		err = dealer.rbc.RBroadcast(message)
+		_, err = dealer.rbc.RBroadcast(message)
 		require.NoError(b, err)
 
 		wg.Wait()

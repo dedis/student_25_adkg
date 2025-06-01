@@ -618,11 +618,13 @@ func runBroadcast(ctx context.Context, t require.TestingT, nodes []*TestNode, ms
 
 	// Start RBC
 	dealer := nodes[0]
-	err := dealer.rbc.RBroadcast(msg)
+	_, err := dealer.rbc.RBroadcast(msg)
 	require.NoError(t, err)
 
 	// Wait enough time for the nodes to have received the PROPOSE message
 	time.Sleep(1 * time.Second)
+
+	//require.True(t, instance.PredicatePassed())
 
 	// Wait for all instances to finish
 	wg.Wait()
@@ -939,7 +941,7 @@ func runWithDyingListeners(t *testing.T, threshold, nbDying int) {
 	wgDead := waitForResult(failingCtx, t, dyingNodes, hash, false)
 
 	// Start RBC from the second node
-	err = dealer.rbc.RBroadcast(message)
+	_, err = dealer.rbc.RBroadcast(message)
 	require.NoError(t, err)
 
 	// Stop the failing nodes
@@ -1054,7 +1056,7 @@ func TestFourRoundsRBC_MultipleInstances(t *testing.T) {
 
 		wg := waitForResult(ctx, t, nodes, hash, true)
 
-		err := dealer.rbc.RBroadcast(message)
+		_, err := dealer.rbc.RBroadcast(message)
 		require.NoError(t, err)
 
 		wgs.Add(1)

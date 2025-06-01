@@ -6,13 +6,14 @@ import (
 )
 
 type State struct {
-	instanceID uint32
-	echoCount  int
-	readyCount int
-	sentReady  bool
-	finished   bool
-	success    bool
-	value      bool
+	instanceID      uint32
+	echoCount       int
+	readyCount      int
+	sentReady       bool
+	finished        bool
+	success         bool
+	value           bool
+	predicatePassed bool
 	sync.RWMutex
 }
 
@@ -48,6 +49,18 @@ func (s *State) Success() bool {
 	s.RLock()
 	defer s.RUnlock()
 	return s.success
+}
+
+func (s *State) PredicatePassed() bool {
+	s.RLock()
+	defer s.RUnlock()
+	return s.predicatePassed
+}
+
+func (s *State) SetPredicatePassed() {
+	s.Lock()
+	defer s.Unlock()
+	s.predicatePassed = true
 }
 
 func (s *State) FailIfNotFinished() bool {

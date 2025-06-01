@@ -282,7 +282,7 @@ func (a *AVSS) reliablyBroadcastCommitment(commitment []kyber.Point) error {
 	if err != nil {
 		return err
 	}
-	err = a.rbc.RBroadcast(commitBytes)
+	_, err = a.rbc.RBroadcast(commitBytes)
 	if err != nil {
 		return err
 	}

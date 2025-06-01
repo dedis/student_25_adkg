@@ -76,18 +76,18 @@ func (a *ACSS) Share(secret kyber.Scalar) (*Instance, error) {
 
 	rbcPayload, err := proto.Marshal(rbcPayloadMessage)
 
-	// Compute the hash of the payload to be able to identify RBC messages for this instance
-	hasher := sha256.New()
-	hasher.Write(rbcPayload)
-	hash := hasher.Sum(nil)
+	rbcInstance, err := a.rbc.RBroadcast(rbcPayload)
+	if err != nil {
+		return nil, err
+	}
 
 	// Register this instance if it does not exist
-	instance, created := a.getOrCreateInstance(hash)
+	instance, created := a.getOrCreateInstance(rbcInstance.Identifier())
 	if !created {
 		return instance, errors.New("instance already exists with the same hash")
 	}
 
-	return instance, a.rbc.RBroadcast(rbcPayload)
+	return instance, nil
 }
 
 func (a *ACSS) Reconstruct(instance *Instance) error {

@@ -13,7 +13,6 @@ import (
 	"github.com/rs/zerolog"
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/share"
-	"go.dedis.ch/kyber/v4/util/random"
 	"go.dedis.ch/protobuf"
 	"golang.org/x/xerrors"
 	"google.golang.org/protobuf/proto"
@@ -258,8 +257,7 @@ func (a *AVSS) initiateReconstruction(state rbc.Instance[[]byte]) {
 // and the RBC broadcast has been initiated (not finished!).
 func (a *AVSS) Share(s kyber.Scalar) error {
 	// Randomly sample a polynomial s.t. the origin is at s
-	p := share.NewPriPoly(a.conf.Group, a.conf.Threshold, s, random.New())
-	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, a.conf.Threshold,
+	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(s, a.conf.Threshold,
 		a.conf.NbNodes, a.conf.Group, a.conf.Base0, a.conf.Base1)
 	if err != nil {
 		return err

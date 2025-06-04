@@ -162,7 +162,7 @@ func (a *ACSS) predicate(payload []byte) bool {
 // verifyPedersenCommit allows to more easily verify a commitment or shares without having to write
 // the full method with the config that will be the same for every call
 func (a *ACSS) verifyPedersenCommit(commit []kyber.Point, sShare, rShare *share.PriShare) bool {
-	return pedersencommitment.PedPolyVerify(commit, int64(sShare.I), sShare, rShare,
+	return pedersencommitment.PedPolyVerify(commit, sShare, rShare,
 		a.config.Group, a.config.Base0, a.config.Base1)
 }
 

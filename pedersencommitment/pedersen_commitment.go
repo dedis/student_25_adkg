@@ -31,10 +31,11 @@ func PedPolyCommit(s0 kyber.Scalar, t, n int,
 }
 
 // PedPolyVerify verifies that the given share opens the given polynomial commitment
-func PedPolyVerify(commits []kyber.Point, idx int64, si, ri *share.PriShare, g kyber.Group, g0, g1 kyber.Point) bool {
+func PedPolyVerify(commits []kyber.Point, si, ri *share.PriShare, g kyber.Group, g0, g1 kyber.Point) bool {
 
 	// Compute PI_0^t v^i^j
-	xi := g.Scalar().SetInt64(1 + int64(idx))
+	idx := int64(si.I)
+	xi := g.Scalar().SetInt64(1 + idx)
 	v := g.Point().Null()
 	for j := len(commits) - 1; j >= 0; j-- {
 		v.Mul(xi, v)

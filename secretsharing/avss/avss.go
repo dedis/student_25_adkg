@@ -141,8 +141,7 @@ func unmarshalShares(sBytes, rBytes []byte) (sShare, rShare *share.PriShare, err
 func verifyDeal(deal *Deal, commitment []kyber.Point, config secretsharing.Config) bool {
 	sShare := deal.sShare
 	rShare := deal.rShare
-	index := int64(deal.sShare.I)
-	ok := pedersencommitment.PedPolyVerify(commitment, index, sShare, rShare, config.Group, config.Base0, config.Base1)
+	ok := pedersencommitment.PedPolyVerify(commitment, sShare, rShare, config.Group, config.Base0, config.Base1)
 	return ok
 }
 

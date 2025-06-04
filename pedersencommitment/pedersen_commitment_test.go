@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.dedis.ch/kyber/v4/group/edwards25519"
 	"go.dedis.ch/kyber/v4/share"
-	"go.dedis.ch/kyber/v4/util/random"
 )
 
 // TestPedersenCommitment_PolyCommit runs the commitment algorithm and tests
@@ -22,11 +21,8 @@ func TestPedersenCommitment_PolyCommit(t *testing.T) {
 	// Secret
 	secret := g.Scalar().Pick(g.RandomStream())
 
-	// Secret polynomial
-	p := share.NewPriPoly(g, threshold, secret, random.New())
-
 	// Run commitment
-	v, s, r, err := PedPolyCommit(p, threshold, n, g, g0, g1)
+	v, s, r, err := PedPolyCommit(secret, threshold, n, g, g0, g1)
 	require.NoError(t, err)
 
 	// Recover the polynomials p and phi
@@ -68,11 +64,8 @@ func TestPedersenCommitment_SimpleEndToEnd(t *testing.T) {
 	// Secret
 	secret := g.Scalar().Pick(g.RandomStream())
 
-	// Secret polynomial
-	p := share.NewPriPoly(g, threshold, secret, random.New())
-
 	// Run commitment
-	v, s, r, err := PedPolyCommit(p, threshold, n, g, g0, g1)
+	v, s, r, err := PedPolyCommit(secret, threshold, n, g, g0, g1)
 	require.NoError(t, err)
 
 	for i := range s {

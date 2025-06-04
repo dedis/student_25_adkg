@@ -16,7 +16,6 @@ import (
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/encrypt/ecies"
 	"go.dedis.ch/kyber/v4/share"
-	"go.dedis.ch/kyber/v4/util/random"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -57,8 +56,7 @@ func NewACSS(config secretsharing.Config, iface networking.NetworkInterface, rbc
 
 func (a *ACSS) Share(secret kyber.Scalar) (*Instance, error) {
 	// Randomly sample a polynomial s.t. the origin is at s
-	p := share.NewPriPoly(a.config.Group, a.config.Threshold, secret, random.New())
-	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, a.config.Threshold,
+	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(secret, a.config.Threshold,
 		a.config.NbNodes, a.config.Group, a.config.Base0, a.config.Base1)
 	if err != nil {
 		return nil, err

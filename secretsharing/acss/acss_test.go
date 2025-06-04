@@ -464,8 +464,7 @@ func TestACSS_SendReconstructMessage(t *testing.T) {
 
 	// Create an Instance to mock the sharing phase
 	secret := config.Group.Scalar().SetInt64(1)
-	p := share.NewPriPoly(config.Group, config.Threshold, secret, random.New())
-	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, config.Threshold,
+	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(secret, config.Threshold,
 		config.NbNodes, config.Group, config.Base0, config.Base1)
 	require.NoError(t, err)
 
@@ -539,8 +538,7 @@ func TestACSS_AllReconstruct(t *testing.T) {
 
 	// Create an Instance to mock the sharing phase
 	secret := config.Group.Scalar().SetInt64(1)
-	p := share.NewPriPoly(config.Group, config.Threshold, secret, random.New())
-	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, config.Threshold,
+	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(secret, config.Threshold,
 		config.NbNodes, config.Group, config.Base0, config.Base1)
 	require.NoError(t, err)
 
@@ -603,8 +601,7 @@ func TestACSS_ThresholdReconstruct(t *testing.T) {
 
 	// Create an Instance to mock the sharing phase
 	secret := config.Group.Scalar().SetInt64(1)
-	p := share.NewPriPoly(config.Group, config.Threshold, secret, random.New())
-	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(p, config.Threshold,
+	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(secret, config.Threshold,
 		config.NbNodes, config.Group, config.Base0, config.Base1)
 	require.NoError(t, err)
 

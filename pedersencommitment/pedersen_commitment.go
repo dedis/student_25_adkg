@@ -6,8 +6,10 @@ import (
 	"go.dedis.ch/kyber/v4/util/random"
 )
 
-func PedPolyCommit(p *share.PriPoly, t, n int,
+// PedPolyCommit creates a polynomial commitment for the given kyber.Scalar.
+func PedPolyCommit(s0 kyber.Scalar, t, n int,
 	g kyber.Group, g0, g1 kyber.Point) (commit []kyber.Point, sShare, rShare []*share.PriShare, err error) {
+	p := share.NewPriPoly(g, t, s0, random.New())
 	phi := share.NewPriPoly(g, t, nil, random.New())
 
 	// Compute g0^p(x)
@@ -28,6 +30,7 @@ func PedPolyCommit(p *share.PriPoly, t, n int,
 	return commit, s, r, nil
 }
 
+// PedPolyVerify verifies that the given share opens the given polynomial commitment
 func PedPolyVerify(commits []kyber.Point, idx int64, si, ri *share.PriShare, g kyber.Group, g0, g1 kyber.Point) bool {
 
 	// Compute PI_0^t v^i^j

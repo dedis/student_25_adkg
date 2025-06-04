@@ -286,7 +286,7 @@ func TestACSS_ShareVerification(t *testing.T) {
 				return false
 			}
 
-			ok := pedersencommitment.PedPolyVerify(commit, int64(si.I), si, ri, config.Group, config.Base0, config.Base1)
+			ok := pedersencommitment.PedPolyVerify(commit, si, ri, config.Group, config.Base0, config.Base1)
 			require.True(t, ok)
 			return ok
 		}

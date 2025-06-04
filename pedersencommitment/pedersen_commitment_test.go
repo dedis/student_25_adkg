@@ -73,7 +73,7 @@ func TestPedersenCommitment_SimpleEndToEnd(t *testing.T) {
 		ri := r[i]
 		idx := si.I
 
-		ok := PedPolyVerify(v, int64(idx), si, ri, g, g0, g1)
+		ok := PedPolyVerify(v, si, ri, g, g0, g1)
 		require.True(t, ok, "PedPolyVerify at idx %d did not work", idx)
 	}
 }

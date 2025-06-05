@@ -40,15 +40,6 @@ func startDummyNode(ctx context.Context, iface networking.NetworkInterface) {
 	}()
 }
 
-// defaultPredicate always return true. In RBC, the predicate simply
-// allows to check that the message being broadcasted follow a given
-// predicate but has nothing to do with the logic of the protocol other
-// that if the predicate is not satisfied, the broadcast should be stopped
-func defaultPredicate([]byte) bool {
-	// For now, we don't care what this does
-	return true
-}
-
 func createDefaultNetworkTestNode(network networking.Network, mLen int) *TestNode {
 	threshold := 2
 	nbNodes := 3*threshold + 1
@@ -57,7 +48,7 @@ func createDefaultNetworkTestNode(network networking.Network, mLen int) *TestNod
 		panic(err)
 	}
 	rs := reedsolomon.NewBWCodes(mLen, nbNodes)
-	node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
+	node := NewTestNode(nIface, NewFourRoundRBC(sha256.New(), threshold, nIface, rs, nIface.GetID()))
 	return node
 }
 
@@ -635,6 +626,7 @@ func runBroadcast(ctx context.Context, t require.TestingT, nodes []*TestNode, ms
 // makes the testing fail in case of a problem
 func checkRBCResult(t *testing.T, nodes []*TestNode, msg, msgHash []byte) {
 	for _, node := range nodes {
+		require.Equal(t, 1, len(node.rbc.GetInstances()))
 		state, ok := node.rbc.GetState(msgHash)
 		require.True(t, ok)
 		require.True(t, state.Finished())

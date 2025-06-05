@@ -18,6 +18,9 @@ import (
 
 var ErrInstanceAlreadyExists = errors.New("instance already exists")
 
+// DefaultPredicate is set by default when creating an RBC instance. It accepts everything.
+var DefaultPredicate = func(_ []byte) bool { return true }
+
 type FourRoundRBC struct {
 	iface     rbc.AuthenticatedMessageStream
 	predicate func([]byte) bool
@@ -31,13 +34,13 @@ type FourRoundRBC struct {
 	sync.RWMutex
 }
 
-func NewFourRoundRBC(predicate func([]byte) bool, h hash.Hash, threshold int,
-	iface rbc.AuthenticatedMessageStream,
+// NewFourRoundRBC creates a new 4-Round RBC instance. By default, the predicate is the DefaultPredicate.
+// Use SetPredicate to change it.
+func NewFourRoundRBC(h hash.Hash, threshold int, iface rbc.AuthenticatedMessageStream,
 	rs reedsolomon.RSCodes, nodeID int64) *FourRoundRBC {
-
 	return &FourRoundRBC{
 		iface:           iface,
-		predicate:       predicate,
+		predicate:       DefaultPredicate,
 		Hash:            h,
 		rs:              rs,
 		threshold:       threshold,
@@ -77,6 +80,22 @@ func (f *FourRoundRBC) RBroadcast(message []byte) (rbc.Instance[[]byte], error) 
 	inst := createProposeMessage(message)
 	err = f.broadcastMessage(inst)
 	return newState, err
+}
+
+func (f *FourRoundRBC) SetPredicate(predicate rbc.Predicate) {
+	f.Lock()
+	defer f.Unlock()
+	f.predicate = predicate
+}
+
+func (f *FourRoundRBC) GetInstances() []rbc.Instance[[]byte] {
+	f.RLock()
+	defer f.RUnlock()
+	instances := make([]rbc.Instance[[]byte], 0, len(f.states))
+	for _, state := range f.states {
+		instances = append(instances, state)
+	}
+	return instances
 }
 
 // Listen starts listening to incoming messages from the network and handles

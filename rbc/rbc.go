@@ -33,6 +33,8 @@ type Instance[T any] interface {
 	PredicatePassed() bool
 }
 
+type Predicate func([]byte) bool
+
 // RBC is an interface for an RBC protocol
 type RBC[T any] interface {
 	// RBroadcast broadcasts the given value and returns the Instance created
@@ -42,9 +44,14 @@ type RBC[T any] interface {
 	// Listen makes the node listen to the network for RBC messages. This method returns only
 	// when the context is stopped or its deadline exceeded returning any of the two errors.
 	Listen(ctx context.Context) error
+	// GetInstances returns all the Instance that this node as received, regardless of their finished
+	// status.
+	GetInstances() []Instance[T]
 	// GetFinishedChannel returns a channel where finished instances a pushed in. When the
 	// RBC is finished, this channel will be closed.
 	GetFinishedChannel() <-chan Instance[T]
+	// SetPredicate allows to set the predicate used to check incoming messages.
+	SetPredicate(Predicate)
 }
 
 var ErrPredicateRejected = errors.New("predicate rejected")

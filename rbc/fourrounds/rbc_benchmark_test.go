@@ -30,7 +30,7 @@ func createNetwork(network networking.Network, threshold int) ([]*TestNode, erro
 			return nil, err
 		}
 		rs := reedsolomon.NewBWCodes(threshold+1, nbNodes)
-		node := NewTestNode(nIface, NewFourRoundRBC(defaultPredicate, sha256.New(), threshold, nIface, rs, nIface.GetID()))
+		node := NewTestNode(nIface, NewFourRoundRBC(sha256.New(), threshold, nIface, rs, nIface.GetID()))
 		nodes[i] = node
 	}
 	return nodes, nil

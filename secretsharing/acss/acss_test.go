@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"fmt"
 	"strconv"
 	"student_25_adkg/networking"
 	"student_25_adkg/pedersencommitment"
@@ -820,30 +819,20 @@ func TestACSS_RealNetworkStress(t *testing.T) {
 	cancel()
 }
 
-func TestACSS_BenchmarkMessages(b *testing.T) {
-	threshold := 50
-
-	config := getDefaultConfig()
-	secret := config.Group.Scalar().SetInt64(1)
-
+func runOnRealNetworkAndFourRoundRBC(t require.TestingT, config secretsharing.Config, secret kyber.Scalar) []*TestNode {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	config.Threshold = threshold
-	config.NbNodes = threshold*3 + 1
 
 	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
 
-	startNodes(ctx, b, nodes, context.Canceled)
+	startNodes(ctx, t, nodes, context.Canceled)
 
 	dealer := nodes[0]
 
-	start := time.Now()
-
 	// Start ACSS from the dealer
 	instance, err := dealer.acss.Share(secret)
-	require.NoError(b, err)
+	require.NoError(t, err)
 
 	// Wait for RBC to finish
 	rbcWait := sync.WaitGroup{}
@@ -868,7 +857,7 @@ func TestACSS_BenchmarkMessages(b *testing.T) {
 	for _, node := range nodes {
 		instance := node.acss.GetInstances()[0]
 		err := node.acss.Reconstruct(instance)
-		require.NoError(b, err)
+		require.NoError(t, err)
 	}
 
 	// Wait for all nodes to finish
@@ -890,10 +879,22 @@ func TestACSS_BenchmarkMessages(b *testing.T) {
 
 	// Wait for all nodes to finish
 	allFinish.Wait()
-
-	end := time.Now()
-
 	cancel()
+	return nodes
+}
+
+func TestACSS_BenchmarkMessages(b *testing.T) {
+	threshold := 50
+
+	config := getDefaultConfig()
+	secret := config.Group.Scalar().SetInt64(1)
+
+	config.Threshold = threshold
+	config.NbNodes = threshold*3 + 1
+
+	start := time.Now()
+	nodes := runOnRealNetworkAndFourRoundRBC(b, config, secret)
+	end := time.Now()
 
 	duration := end.Sub(start)
 	messagesSent := 0
@@ -911,5 +912,7 @@ func TestACSS_BenchmarkMessages(b *testing.T) {
 		}
 	}
 
-	fmt.Printf("%s,%s,%s,%s", strconv.FormatInt(duration.Milliseconds(), 10), strconv.Itoa(threshold), strconv.Itoa(messagesSent), strconv.Itoa(bytesSent))
+	// Log the result
+	b.Logf("%s,%s,%s,%s", strconv.FormatInt(duration.Milliseconds(), 10),
+		strconv.Itoa(threshold), strconv.Itoa(messagesSent), strconv.Itoa(bytesSent))
 }

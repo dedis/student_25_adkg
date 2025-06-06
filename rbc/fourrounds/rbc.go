@@ -79,7 +79,13 @@ func (f *FourRoundRBC) RBroadcast(message []byte) (rbc.Instance[[]byte], error) 
 	return newState, err
 }
 
-// Listen starts listening to incoming messages from the network and handles
+func (f *FourRoundRBC) SetPredicate(predicate func([]byte) bool) {
+	f.Lock()
+	defer f.Unlock()
+	f.predicate = predicate
+}
+
+	// Listen starts listening to incoming messages from the network and handles
 // them. This method blocks until the context passed is either cancelled
 // (context.Canceled) or its deadline exceeded (context.DeadlineExceeded)
 func (f *FourRoundRBC) Listen(ctx context.Context) error {

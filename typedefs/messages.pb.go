@@ -119,11 +119,201 @@ func (*RBCMessage_EchoInst) isRBCMessage_Op() {}
 
 func (*RBCMessage_ReadyInst) isRBCMessage_Op() {}
 
+type SSMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Op:
+	//
+	//	*SSMessage_ShareInst
+	//	*SSMessage_ReconstructInst
+	Op            isSSMessage_Op `protobuf_oneof:"op"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SSMessage) Reset() {
+	*x = SSMessage{}
+	mi := &file_messages_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SSMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SSMessage) ProtoMessage() {}
+
+func (x *SSMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SSMessage.ProtoReflect.Descriptor instead.
+func (*SSMessage) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SSMessage) GetOp() isSSMessage_Op {
+	if x != nil {
+		return x.Op
+	}
+	return nil
+}
+
+func (x *SSMessage) GetShareInst() *SSMessage_Share {
+	if x != nil {
+		if x, ok := x.Op.(*SSMessage_ShareInst); ok {
+			return x.ShareInst
+		}
+	}
+	return nil
+}
+
+func (x *SSMessage) GetReconstructInst() *SSMessage_Reconstruct {
+	if x != nil {
+		if x, ok := x.Op.(*SSMessage_ReconstructInst); ok {
+			return x.ReconstructInst
+		}
+	}
+	return nil
+}
+
+type isSSMessage_Op interface {
+	isSSMessage_Op()
+}
+
+type SSMessage_ShareInst struct {
+	ShareInst *SSMessage_Share `protobuf:"bytes,1,opt,name=share_inst,json=shareInst,proto3,oneof"`
+}
+
+type SSMessage_ReconstructInst struct {
+	ReconstructInst *SSMessage_Reconstruct `protobuf:"bytes,2,opt,name=reconstruct_inst,json=reconstructInst,proto3,oneof"`
+}
+
+func (*SSMessage_ShareInst) isSSMessage_Op() {}
+
+func (*SSMessage_ReconstructInst) isSSMessage_Op() {}
+
+type ACSSMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Op:
+	//
+	//	*ACSSMessage_ImplicateInst
+	//	*ACSSMessage_RecoverInst
+	//	*ACSSMessage_ReconstructInst
+	Op                 isACSSMessage_Op `protobuf_oneof:"op"`
+	InstanceIdentifier []byte           `protobuf:"bytes,4,opt,name=instanceIdentifier,proto3" json:"instanceIdentifier,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ACSSMessage) Reset() {
+	*x = ACSSMessage{}
+	mi := &file_messages_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ACSSMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ACSSMessage) ProtoMessage() {}
+
+func (x *ACSSMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ACSSMessage.ProtoReflect.Descriptor instead.
+func (*ACSSMessage) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ACSSMessage) GetOp() isACSSMessage_Op {
+	if x != nil {
+		return x.Op
+	}
+	return nil
+}
+
+func (x *ACSSMessage) GetImplicateInst() *ACSSMessage_Implicate {
+	if x != nil {
+		if x, ok := x.Op.(*ACSSMessage_ImplicateInst); ok {
+			return x.ImplicateInst
+		}
+	}
+	return nil
+}
+
+func (x *ACSSMessage) GetRecoverInst() *ACSSMessage_Recover {
+	if x != nil {
+		if x, ok := x.Op.(*ACSSMessage_RecoverInst); ok {
+			return x.RecoverInst
+		}
+	}
+	return nil
+}
+
+func (x *ACSSMessage) GetReconstructInst() *SSMessage_Reconstruct {
+	if x != nil {
+		if x, ok := x.Op.(*ACSSMessage_ReconstructInst); ok {
+			return x.ReconstructInst
+		}
+	}
+	return nil
+}
+
+func (x *ACSSMessage) GetInstanceIdentifier() []byte {
+	if x != nil {
+		return x.InstanceIdentifier
+	}
+	return nil
+}
+
+type isACSSMessage_Op interface {
+	isACSSMessage_Op()
+}
+
+type ACSSMessage_ImplicateInst struct {
+	ImplicateInst *ACSSMessage_Implicate `protobuf:"bytes,1,opt,name=implicate_inst,json=implicateInst,proto3,oneof"`
+}
+
+type ACSSMessage_RecoverInst struct {
+	RecoverInst *ACSSMessage_Recover `protobuf:"bytes,2,opt,name=recover_inst,json=recoverInst,proto3,oneof"`
+}
+
+type ACSSMessage_ReconstructInst struct {
+	ReconstructInst *SSMessage_Reconstruct `protobuf:"bytes,3,opt,name=reconstruct_inst,json=reconstructInst,proto3,oneof"`
+}
+
+func (*ACSSMessage_ImplicateInst) isACSSMessage_Op() {}
+
+func (*ACSSMessage_RecoverInst) isACSSMessage_Op() {}
+
+func (*ACSSMessage_ReconstructInst) isACSSMessage_Op() {}
+
 type Packet struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Message:
 	//
 	//	*Packet_RbcMessage
+	//	*Packet_SsMessageInst
+	//	*Packet_AcssMessage
 	Message       isPacket_Message `protobuf_oneof:"message"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -131,7 +321,7 @@ type Packet struct {
 
 func (x *Packet) Reset() {
 	*x = Packet{}
-	mi := &file_messages_proto_msgTypes[1]
+	mi := &file_messages_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -143,7 +333,7 @@ func (x *Packet) String() string {
 func (*Packet) ProtoMessage() {}
 
 func (x *Packet) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[1]
+	mi := &file_messages_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -156,7 +346,7 @@ func (x *Packet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Packet.ProtoReflect.Descriptor instead.
 func (*Packet) Descriptor() ([]byte, []int) {
-	return file_messages_proto_rawDescGZIP(), []int{1}
+	return file_messages_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Packet) GetMessage() isPacket_Message {
@@ -175,6 +365,24 @@ func (x *Packet) GetRbcMessage() *RBCMessage {
 	return nil
 }
 
+func (x *Packet) GetSsMessageInst() *SSMessage {
+	if x != nil {
+		if x, ok := x.Message.(*Packet_SsMessageInst); ok {
+			return x.SsMessageInst
+		}
+	}
+	return nil
+}
+
+func (x *Packet) GetAcssMessage() *ACSSMessage {
+	if x != nil {
+		if x, ok := x.Message.(*Packet_AcssMessage); ok {
+			return x.AcssMessage
+		}
+	}
+	return nil
+}
+
 type isPacket_Message interface {
 	isPacket_Message()
 }
@@ -183,7 +391,19 @@ type Packet_RbcMessage struct {
 	RbcMessage *RBCMessage `protobuf:"bytes,1,opt,name=rbcMessage,proto3,oneof"`
 }
 
+type Packet_SsMessageInst struct {
+	SsMessageInst *SSMessage `protobuf:"bytes,2,opt,name=ss_message_inst,json=ssMessageInst,proto3,oneof"`
+}
+
+type Packet_AcssMessage struct {
+	AcssMessage *ACSSMessage `protobuf:"bytes,3,opt,name=acssMessage,proto3,oneof"`
+}
+
 func (*Packet_RbcMessage) isPacket_Message() {}
+
+func (*Packet_SsMessageInst) isPacket_Message() {}
+
+func (*Packet_AcssMessage) isPacket_Message() {}
 
 type RBCMessage_Propose struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -194,7 +414,7 @@ type RBCMessage_Propose struct {
 
 func (x *RBCMessage_Propose) Reset() {
 	*x = RBCMessage_Propose{}
-	mi := &file_messages_proto_msgTypes[2]
+	mi := &file_messages_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -206,7 +426,7 @@ func (x *RBCMessage_Propose) String() string {
 func (*RBCMessage_Propose) ProtoMessage() {}
 
 func (x *RBCMessage_Propose) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[2]
+	mi := &file_messages_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -240,7 +460,7 @@ type RBCMessage_Echo struct {
 
 func (x *RBCMessage_Echo) Reset() {
 	*x = RBCMessage_Echo{}
-	mi := &file_messages_proto_msgTypes[3]
+	mi := &file_messages_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -252,7 +472,7 @@ func (x *RBCMessage_Echo) String() string {
 func (*RBCMessage_Echo) ProtoMessage() {}
 
 func (x *RBCMessage_Echo) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[3]
+	mi := &file_messages_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -300,7 +520,7 @@ type RBCMessage_Ready struct {
 
 func (x *RBCMessage_Ready) Reset() {
 	*x = RBCMessage_Ready{}
-	mi := &file_messages_proto_msgTypes[4]
+	mi := &file_messages_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -312,7 +532,7 @@ func (x *RBCMessage_Ready) String() string {
 func (*RBCMessage_Ready) ProtoMessage() {}
 
 func (x *RBCMessage_Ready) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_proto_msgTypes[4]
+	mi := &file_messages_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -349,6 +569,266 @@ func (x *RBCMessage_Ready) GetIndex() int64 {
 	return 0
 }
 
+type SSMessage_Share struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Si            [][]byte               `protobuf:"bytes,1,rep,name=si,proto3" json:"si,omitempty"`
+	Ri            [][]byte               `protobuf:"bytes,2,rep,name=ri,proto3" json:"ri,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SSMessage_Share) Reset() {
+	*x = SSMessage_Share{}
+	mi := &file_messages_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SSMessage_Share) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SSMessage_Share) ProtoMessage() {}
+
+func (x *SSMessage_Share) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SSMessage_Share.ProtoReflect.Descriptor instead.
+func (*SSMessage_Share) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{1, 0}
+}
+
+func (x *SSMessage_Share) GetSi() [][]byte {
+	if x != nil {
+		return x.Si
+	}
+	return nil
+}
+
+func (x *SSMessage_Share) GetRi() [][]byte {
+	if x != nil {
+		return x.Ri
+	}
+	return nil
+}
+
+type SSMessage_Reconstruct struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Si            []byte                 `protobuf:"bytes,1,opt,name=si,proto3" json:"si,omitempty"`
+	Ri            []byte                 `protobuf:"bytes,2,opt,name=ri,proto3" json:"ri,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SSMessage_Reconstruct) Reset() {
+	*x = SSMessage_Reconstruct{}
+	mi := &file_messages_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SSMessage_Reconstruct) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SSMessage_Reconstruct) ProtoMessage() {}
+
+func (x *SSMessage_Reconstruct) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SSMessage_Reconstruct.ProtoReflect.Descriptor instead.
+func (*SSMessage_Reconstruct) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{1, 1}
+}
+
+func (x *SSMessage_Reconstruct) GetSi() []byte {
+	if x != nil {
+		return x.Si
+	}
+	return nil
+}
+
+func (x *SSMessage_Reconstruct) GetRi() []byte {
+	if x != nil {
+		return x.Ri
+	}
+	return nil
+}
+
+type ACSSMessage_RBCPayload struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	EncryptedShares [][]byte               `protobuf:"bytes,1,rep,name=encryptedShares,proto3" json:"encryptedShares,omitempty"`
+	Commitment      []byte                 `protobuf:"bytes,2,opt,name=commitment,proto3" json:"commitment,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ACSSMessage_RBCPayload) Reset() {
+	*x = ACSSMessage_RBCPayload{}
+	mi := &file_messages_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ACSSMessage_RBCPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ACSSMessage_RBCPayload) ProtoMessage() {}
+
+func (x *ACSSMessage_RBCPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ACSSMessage_RBCPayload.ProtoReflect.Descriptor instead.
+func (*ACSSMessage_RBCPayload) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{2, 0}
+}
+
+func (x *ACSSMessage_RBCPayload) GetEncryptedShares() [][]byte {
+	if x != nil {
+		return x.EncryptedShares
+	}
+	return nil
+}
+
+func (x *ACSSMessage_RBCPayload) GetCommitment() []byte {
+	if x != nil {
+		return x.Commitment
+	}
+	return nil
+}
+
+type ACSSMessage_Implicate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Index         int64                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	SecretKey     []byte                 `protobuf:"bytes,2,opt,name=secretKey,proto3" json:"secretKey,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ACSSMessage_Implicate) Reset() {
+	*x = ACSSMessage_Implicate{}
+	mi := &file_messages_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ACSSMessage_Implicate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ACSSMessage_Implicate) ProtoMessage() {}
+
+func (x *ACSSMessage_Implicate) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ACSSMessage_Implicate.ProtoReflect.Descriptor instead.
+func (*ACSSMessage_Implicate) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{2, 1}
+}
+
+func (x *ACSSMessage_Implicate) GetIndex() int64 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *ACSSMessage_Implicate) GetSecretKey() []byte {
+	if x != nil {
+		return x.SecretKey
+	}
+	return nil
+}
+
+type ACSSMessage_Recover struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Index         int64                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	SecretKey     []byte                 `protobuf:"bytes,2,opt,name=secretKey,proto3" json:"secretKey,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ACSSMessage_Recover) Reset() {
+	*x = ACSSMessage_Recover{}
+	mi := &file_messages_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ACSSMessage_Recover) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ACSSMessage_Recover) ProtoMessage() {}
+
+func (x *ACSSMessage_Recover) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ACSSMessage_Recover.ProtoReflect.Descriptor instead.
+func (*ACSSMessage_Recover) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{2, 2}
+}
+
+func (x *ACSSMessage_Recover) GetIndex() int64 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *ACSSMessage_Recover) GetSecretKey() []byte {
+	if x != nil {
+		return x.SecretKey
+	}
+	return nil
+}
+
 var File_messages_proto protoreflect.FileDescriptor
 
 const file_messages_proto_rawDesc = "" +
@@ -370,11 +850,42 @@ const file_messages_proto_rawDesc = "" +
 	"\rencodingShare\x18\x01 \x01(\fR\rencodingShare\x12 \n" +
 	"\vmessageHash\x18\x02 \x01(\fR\vmessageHash\x12\x14\n" +
 	"\x05index\x18\x03 \x01(\x03R\x05indexB\x04\n" +
-	"\x02op\"K\n" +
+	"\x02op\"\xf3\x01\n" +
+	"\tSSMessage\x12:\n" +
+	"\n" +
+	"share_inst\x18\x01 \x01(\v2\x19.typedefs.SSMessage.ShareH\x00R\tshareInst\x12L\n" +
+	"\x10reconstruct_inst\x18\x02 \x01(\v2\x1f.typedefs.SSMessage.ReconstructH\x00R\x0freconstructInst\x1a'\n" +
+	"\x05Share\x12\x0e\n" +
+	"\x02si\x18\x01 \x03(\fR\x02si\x12\x0e\n" +
+	"\x02ri\x18\x02 \x03(\fR\x02ri\x1a-\n" +
+	"\vReconstruct\x12\x0e\n" +
+	"\x02si\x18\x01 \x01(\fR\x02si\x12\x0e\n" +
+	"\x02ri\x18\x02 \x01(\fR\x02riB\x04\n" +
+	"\x02op\"\xf7\x03\n" +
+	"\vACSSMessage\x12H\n" +
+	"\x0eimplicate_inst\x18\x01 \x01(\v2\x1f.typedefs.ACSSMessage.ImplicateH\x00R\rimplicateInst\x12B\n" +
+	"\frecover_inst\x18\x02 \x01(\v2\x1d.typedefs.ACSSMessage.RecoverH\x00R\vrecoverInst\x12L\n" +
+	"\x10reconstruct_inst\x18\x03 \x01(\v2\x1f.typedefs.SSMessage.ReconstructH\x00R\x0freconstructInst\x12.\n" +
+	"\x12instanceIdentifier\x18\x04 \x01(\fR\x12instanceIdentifier\x1aV\n" +
+	"\n" +
+	"RBCPayload\x12(\n" +
+	"\x0fencryptedShares\x18\x01 \x03(\fR\x0fencryptedShares\x12\x1e\n" +
+	"\n" +
+	"commitment\x18\x02 \x01(\fR\n" +
+	"commitment\x1a?\n" +
+	"\tImplicate\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\x03R\x05index\x12\x1c\n" +
+	"\tsecretKey\x18\x02 \x01(\fR\tsecretKey\x1a=\n" +
+	"\aRecover\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\x03R\x05index\x12\x1c\n" +
+	"\tsecretKey\x18\x02 \x01(\fR\tsecretKeyB\x04\n" +
+	"\x02op\"\xc5\x01\n" +
 	"\x06Packet\x126\n" +
 	"\n" +
 	"rbcMessage\x18\x01 \x01(\v2\x14.typedefs.RBCMessageH\x00R\n" +
-	"rbcMessageB\t\n" +
+	"rbcMessage\x12=\n" +
+	"\x0fss_message_inst\x18\x02 \x01(\v2\x13.typedefs.SSMessageH\x00R\rssMessageInst\x129\n" +
+	"\vacssMessage\x18\x03 \x01(\v2\x15.typedefs.ACSSMessageH\x00R\vacssMessageB\t\n" +
 	"\amessageB\fZ\n" +
 	"./typedefsb\x06proto3"
 
@@ -390,24 +901,38 @@ func file_messages_proto_rawDescGZIP() []byte {
 	return file_messages_proto_rawDescData
 }
 
-var file_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_messages_proto_goTypes = []any{
-	(*RBCMessage)(nil),         // 0: typedefs.RBCMessage
-	(*Packet)(nil),             // 1: typedefs.Packet
-	(*RBCMessage_Propose)(nil), // 2: typedefs.RBCMessage.Propose
-	(*RBCMessage_Echo)(nil),    // 3: typedefs.RBCMessage.Echo
-	(*RBCMessage_Ready)(nil),   // 4: typedefs.RBCMessage.Ready
+	(*RBCMessage)(nil),             // 0: typedefs.RBCMessage
+	(*SSMessage)(nil),              // 1: typedefs.SSMessage
+	(*ACSSMessage)(nil),            // 2: typedefs.ACSSMessage
+	(*Packet)(nil),                 // 3: typedefs.Packet
+	(*RBCMessage_Propose)(nil),     // 4: typedefs.RBCMessage.Propose
+	(*RBCMessage_Echo)(nil),        // 5: typedefs.RBCMessage.Echo
+	(*RBCMessage_Ready)(nil),       // 6: typedefs.RBCMessage.Ready
+	(*SSMessage_Share)(nil),        // 7: typedefs.SSMessage.Share
+	(*SSMessage_Reconstruct)(nil),  // 8: typedefs.SSMessage.Reconstruct
+	(*ACSSMessage_RBCPayload)(nil), // 9: typedefs.ACSSMessage.RBCPayload
+	(*ACSSMessage_Implicate)(nil),  // 10: typedefs.ACSSMessage.Implicate
+	(*ACSSMessage_Recover)(nil),    // 11: typedefs.ACSSMessage.Recover
 }
 var file_messages_proto_depIdxs = []int32{
-	2, // 0: typedefs.RBCMessage.propose_inst:type_name -> typedefs.RBCMessage.Propose
-	3, // 1: typedefs.RBCMessage.echo_inst:type_name -> typedefs.RBCMessage.Echo
-	4, // 2: typedefs.RBCMessage.ready_inst:type_name -> typedefs.RBCMessage.Ready
-	0, // 3: typedefs.Packet.rbcMessage:type_name -> typedefs.RBCMessage
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4,  // 0: typedefs.RBCMessage.propose_inst:type_name -> typedefs.RBCMessage.Propose
+	5,  // 1: typedefs.RBCMessage.echo_inst:type_name -> typedefs.RBCMessage.Echo
+	6,  // 2: typedefs.RBCMessage.ready_inst:type_name -> typedefs.RBCMessage.Ready
+	7,  // 3: typedefs.SSMessage.share_inst:type_name -> typedefs.SSMessage.Share
+	8,  // 4: typedefs.SSMessage.reconstruct_inst:type_name -> typedefs.SSMessage.Reconstruct
+	10, // 5: typedefs.ACSSMessage.implicate_inst:type_name -> typedefs.ACSSMessage.Implicate
+	11, // 6: typedefs.ACSSMessage.recover_inst:type_name -> typedefs.ACSSMessage.Recover
+	8,  // 7: typedefs.ACSSMessage.reconstruct_inst:type_name -> typedefs.SSMessage.Reconstruct
+	0,  // 8: typedefs.Packet.rbcMessage:type_name -> typedefs.RBCMessage
+	1,  // 9: typedefs.Packet.ss_message_inst:type_name -> typedefs.SSMessage
+	2,  // 10: typedefs.Packet.acssMessage:type_name -> typedefs.ACSSMessage
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_messages_proto_init() }
@@ -421,7 +946,18 @@ func file_messages_proto_init() {
 		(*RBCMessage_ReadyInst)(nil),
 	}
 	file_messages_proto_msgTypes[1].OneofWrappers = []any{
+		(*SSMessage_ShareInst)(nil),
+		(*SSMessage_ReconstructInst)(nil),
+	}
+	file_messages_proto_msgTypes[2].OneofWrappers = []any{
+		(*ACSSMessage_ImplicateInst)(nil),
+		(*ACSSMessage_RecoverInst)(nil),
+		(*ACSSMessage_ReconstructInst)(nil),
+	}
+	file_messages_proto_msgTypes[3].OneofWrappers = []any{
 		(*Packet_RbcMessage)(nil),
+		(*Packet_SsMessageInst)(nil),
+		(*Packet_AcssMessage)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -429,7 +965,7 @@ func file_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_messages_proto_rawDesc), len(file_messages_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

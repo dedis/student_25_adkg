@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"student_25_adkg/networking"
@@ -105,21 +106,23 @@ func Benchmark_Threshold20(b *testing.B) {
 	b.ReportAllocs()
 }
 
-func BenchmarkRBC_TimingsMessages(b *testing.B) {
-	b.Skip("Skipping this test by default. Run explicitly if needed.")
-	minThreshold := 2
-	maxThreshold := 30
+func TestRBC_TimingsMessages(b *testing.T) {
+	//b.Skip("Skipping this test by default. Run explicitly if needed.")
+	minThreshold := 5
+	maxThreshold := 35
+
+	stepSize := 5
 
 	messageLength := 2
 	message, messageHash := generateMessage(messageLength)
 
-	size := maxThreshold - minThreshold + 1
+	size := (maxThreshold-minThreshold)/stepSize + 1
 	thresholds := make([]int, size)
 	durations := make([]time.Duration, size)
-	messagesCounts := make([]int, size)
+	messagesSent := make([][][]byte, size)
 
 	idx := 0
-	for threshold := minThreshold; threshold <= maxThreshold; threshold++ {
+	for threshold := minThreshold; threshold <= maxThreshold; threshold += stepSize {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		network := networking.NewTransportNetwork(udp.NewUDP())
 		nodes, err := createNetwork(network, threshold)
@@ -137,19 +140,21 @@ func BenchmarkRBC_TimingsMessages(b *testing.B) {
 
 		thresholds[idx] = threshold
 		durations[idx] = end.Sub(start)
-		messagesCounts[idx] = len(nodes[0].GetReceived())
+		messagesSent[idx] = make([][]byte, 0)
+		for _, node := range nodes {
+			messagesSent[idx] = append(messagesSent[idx], node.GetReceived()...)
+		}
 		idx++
 	}
 
-	saveToCSV(durations, thresholds, messagesCounts)
+	saveToCSV(b, durations, thresholds, messagesSent)
 }
 
-func saveToCSV(timings []time.Duration, thresholds, messagesCounts []int) {
+func saveToCSV(t require.TestingT, timings []time.Duration, thresholds []int, messages [][][]byte) {
+	fmt.Println("Writing to CSV")
 	// Open file for writing
 	file, err := os.Create("output.csv")
-	if err != nil {
-		return
-	}
+	require.NoError(t, err)
 	defer file.Close()
 
 	// Create CSV writer
@@ -157,17 +162,25 @@ func saveToCSV(timings []time.Duration, thresholds, messagesCounts []int) {
 	defer writer.Flush()
 
 	// Write header
-	err = writer.Write([]string{"Timing(ms)", "Threshold", "MessageCount"})
+	err = writer.Write([]string{"Timing(ms)", "Threshold", "MessageCount", "MessagesBytesCount"})
 	if err != nil {
 		panic(err)
 	}
 
 	// Write data rows
 	for i := 0; i < len(timings); i++ {
+
+		messagesCount := len(messages[i])
+		bytesCount := int64(0)
+		for _, m := range messages[i] {
+			bytesCount += int64(len(m))
+		}
+
 		row := []string{
 			strconv.FormatInt(timings[i].Milliseconds(), 10),
 			strconv.Itoa(thresholds[i]),
-			strconv.Itoa(messagesCounts[i]),
+			strconv.Itoa(messagesCount),
+			strconv.FormatInt(bytesCount, 10),
 		}
 		if err := writer.Write(row); err != nil {
 			continue

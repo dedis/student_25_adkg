@@ -766,60 +766,21 @@ func TestACSS_RealNetwork(t *testing.T) {
 }
 
 func TestACSS_RealNetworkStress(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	config := getDefaultConfig()
 	threshold := 30
 	config.Threshold = threshold
 	config.NbNodes = threshold*3 + 1
 
-	// Create two different networks for RBC and ACSS
-	network := networking.NewTransportNetwork(udp.NewUDP())
-	rbcNetwork := networking.NewTransportNetwork(udp.NewUDP())
-
-	interfaces, err := test.SetupNetwork(network, config.NbNodes)
-	if err != nil {
-		panic(err)
-	}
-	rbcInterfaces, err := test.SetupNetwork(rbcNetwork, config.NbNodes)
-	if err != nil {
-		panic(err)
-	}
-
-	// Setup Key store
-	ks, privateKeys := generateKeyStore(interfaces, config.Group)
-
-	nodes := createTestNodes(interfaces, rbcInterfaces, ks, privateKeys, config)
-
-	startNodes(ctx, t, nodes, context.Canceled)
-
-	dealer := nodes[0]
 	secret := config.Group.Scalar().SetInt64(1)
 
-	// Start ACSS from the dealer
-	instance, err := dealer.acss.Share(secret)
-	require.NoError(t, err)
-
-	// Wait for RBC to finish
-	time.Sleep(500 * time.Millisecond)
-
-	// Reconstruct from all nodes
-	for _, node := range nodes {
-		instance := node.acss.GetInstances()[0]
-		err := node.acss.Reconstruct(instance)
-		require.NoError(t, err)
-	}
-
-	// Wait for all messages to be delivered
-	time.Sleep(500 * time.Millisecond)
+	nodes, instance := runOnRealNetworkAndFourRoundRBC(t, config, secret)
 
 	// Check that all nodes successfully reconstructed the correct value
 	checkReconstruction(t, nodes, instance.Identifier(), secret, true, true)
-
-	cancel()
 }
 
-func runOnRealNetworkAndFourRoundRBC(t require.TestingT, config secretsharing.Config, secret kyber.Scalar) []*TestNode {
+func runOnRealNetworkAndFourRoundRBC(t require.TestingT, config secretsharing.Config,
+	secret kyber.Scalar) ([]*TestNode, *Instance) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
@@ -880,10 +841,11 @@ func runOnRealNetworkAndFourRoundRBC(t require.TestingT, config secretsharing.Co
 	// Wait for all nodes to finish
 	allFinish.Wait()
 	cancel()
-	return nodes
+	return nodes, instance
 }
 
-func TestACSS_BenchmarkMessages(b *testing.T) {
+func TestACSS_BenchmarkMessages(t *testing.T) {
+	t.Skip("Remove to run the benchmark function")
 	threshold := 50
 
 	config := getDefaultConfig()
@@ -893,7 +855,7 @@ func TestACSS_BenchmarkMessages(b *testing.T) {
 	config.NbNodes = threshold*3 + 1
 
 	start := time.Now()
-	nodes := runOnRealNetworkAndFourRoundRBC(b, config, secret)
+	nodes, _ := runOnRealNetworkAndFourRoundRBC(t, config, secret)
 	end := time.Now()
 
 	duration := end.Sub(start)
@@ -913,6 +875,6 @@ func TestACSS_BenchmarkMessages(b *testing.T) {
 	}
 
 	// Log the result
-	b.Logf("%s,%s,%s,%s", strconv.FormatInt(duration.Milliseconds(), 10),
+	t.Logf("%s,%s,%s,%s", strconv.FormatInt(duration.Milliseconds(), 10),
 		strconv.Itoa(threshold), strconv.Itoa(messagesSent), strconv.Itoa(bytesSent))
 }

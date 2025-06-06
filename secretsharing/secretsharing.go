@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"go.dedis.ch/kyber/v4"
+	"go.dedis.ch/kyber/v4/share"
 )
 
 type Config struct {
@@ -14,8 +15,22 @@ type Config struct {
 	NbNodes   int
 }
 
+type Instance interface {
+	Finished() bool
+	Reconstructed() bool
+	ReconstructedValue() kyber.Scalar
+	RBCFinished() bool
+	Identifier() []byte
+	SShare() *share.PriShare
+	RShare() *share.PriShare
+	Commit() []kyber.Point
+}
+
 type SecretShare interface {
-	Share(scalar kyber.Scalar) error
-	Reconstruct(ctx context.Context) kyber.Scalar
-	Start(context.Context)
+	Share(scalar kyber.Scalar) (Instance, error)
+	Reconstruct(Instance) error
+	Start(context.Context) error
+	GetInstances() []Instance
+	GetFinishedChannel() <-chan Instance
+	GetIndex() int64
 }

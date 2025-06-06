@@ -780,7 +780,7 @@ func TestACSS_RealNetworkStress(t *testing.T) {
 }
 
 func runOnRealNetworkAndFourRoundRBC(t require.TestingT, config secretsharing.Config,
-	secret kyber.Scalar) ([]*TestNode, *Instance) {
+	secret kyber.Scalar) ([]*TestNode, secretsharing.Instance) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)

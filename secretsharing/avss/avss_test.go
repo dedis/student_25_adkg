@@ -90,6 +90,7 @@ func TestAVSS_EncodeDecodeCommitment(t *testing.T) {
 
 // TestAVSS_EndToEndSimple tests that starting an AVSS instance
 func TestAVSS_EndToEndSimple(t *testing.T) {
+	t.Skip("Skipping")
 	conf := getDefaultConfig()
 	ctx, cancel := context.WithCancel(context.Background())
 

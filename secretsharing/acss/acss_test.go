@@ -8,6 +8,7 @@ import (
 	"student_25_adkg/pedersencommitment"
 	"student_25_adkg/secretsharing"
 	test "student_25_adkg/testing"
+	"student_25_adkg/transport/udp"
 	"student_25_adkg/typedefs"
 	"sync"
 	"testing"
@@ -677,6 +678,111 @@ func TestACSS_ShareAndReconstruct(t *testing.T) {
 	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
 	nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
+
+	startNodes(ctx, t, nodes, context.Canceled)
+
+	dealer := nodes[0]
+	secret := config.Group.Scalar().SetInt64(1)
+
+	// Start ACSS from the dealer
+	instance, err := dealer.acss.Share(secret)
+	require.NoError(t, err)
+
+	// Wait for RBC to finish
+	time.Sleep(500 * time.Millisecond)
+
+	// Reconstruct from all nodes
+	for _, node := range nodes {
+		instance := node.acss.GetInstances()[0]
+		err := node.acss.Reconstruct(instance)
+		require.NoError(t, err)
+	}
+
+	// Wait for all messages to be delivered
+	time.Sleep(500 * time.Millisecond)
+
+	// Check that all nodes successfully reconstructed the correct value
+	checkReconstruction(t, nodes, instance.Identifier(), secret, true, true)
+
+	cancel()
+}
+
+func TestACSS_RealNetwork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	config := getDefaultConfig()
+
+	// Create two different networks for RBC and ACSS
+	network := networking.NewTransportNetwork(udp.NewUDP())
+	rbcNetwork := networking.NewTransportNetwork(udp.NewUDP())
+
+	interfaces, err := test.SetupNetwork(network, config.NbNodes)
+	if err != nil {
+		panic(err)
+	}
+	rbcInterfaces, err := test.SetupNetwork(rbcNetwork, config.NbNodes)
+	if err != nil {
+		panic(err)
+	}
+
+	// Setup Key store
+	ks, privateKeys := generateKeyStore(interfaces, config.Group)
+
+	nodes := createTestNodes(interfaces, rbcInterfaces, ks, privateKeys, config)
+
+	startNodes(ctx, t, nodes, context.Canceled)
+
+	dealer := nodes[0]
+	secret := config.Group.Scalar().SetInt64(1)
+
+	// Start ACSS from the dealer
+	instance, err := dealer.acss.Share(secret)
+	require.NoError(t, err)
+
+	// Wait for RBC to finish
+	time.Sleep(500 * time.Millisecond)
+
+	// Reconstruct from all nodes
+	for _, node := range nodes {
+		instance := node.acss.GetInstances()[0]
+		err := node.acss.Reconstruct(instance)
+		require.NoError(t, err)
+	}
+
+	// Wait for all messages to be delivered
+	time.Sleep(500 * time.Millisecond)
+
+	// Check that all nodes successfully reconstructed the correct value
+	checkReconstruction(t, nodes, instance.Identifier(), secret, true, true)
+
+	cancel()
+}
+
+func TestACSS_RealNetworkStress(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	config := getDefaultConfig()
+	threshold := 30
+	config.Threshold = threshold
+	config.NbNodes = threshold*3 + 1
+
+	// Create two different networks for RBC and ACSS
+	network := networking.NewTransportNetwork(udp.NewUDP())
+	rbcNetwork := networking.NewTransportNetwork(udp.NewUDP())
+
+	interfaces, err := test.SetupNetwork(network, config.NbNodes)
+	if err != nil {
+		panic(err)
+	}
+	rbcInterfaces, err := test.SetupNetwork(rbcNetwork, config.NbNodes)
+	if err != nil {
+		panic(err)
+	}
+
+	// Setup Key store
+	ks, privateKeys := generateKeyStore(interfaces, config.Group)
+
+	nodes := createTestNodes(interfaces, rbcInterfaces, ks, privateKeys, config)
 
 	startNodes(ctx, t, nodes, context.Canceled)
 

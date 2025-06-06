@@ -1,14 +1,16 @@
 package acss
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/csv"
 	"errors"
-	"os"
+	"fmt"
 	"strconv"
 	"student_25_adkg/networking"
 	"student_25_adkg/pedersencommitment"
+	"student_25_adkg/rbc/fourrounds"
+	"student_25_adkg/reedsolomon"
 	"student_25_adkg/secretsharing"
 	test "student_25_adkg/testing"
 	"student_25_adkg/transport/udp"
@@ -38,9 +40,10 @@ func registerPointAndScalarProtobufInterfaces(g kyber.Group) {
 	})
 }
 
-func TestMain(_ *testing.M) {
+func TestMain(m *testing.M) {
 	g := edwards25519.NewBlakeSHA256Ed25519()
 	registerPointAndScalarProtobufInterfaces(g)
+	m.Run()
 }
 
 var defaultThreshold = 2
@@ -112,7 +115,9 @@ func createTestNodes(interfaces, rbcInterfaces []networking.NetworkInterface, ks
 	nodes := make([]*TestNode, len(interfaces))
 
 	for i, iface := range interfaces {
-		rbc := test.NewMockRBC(rbcInterfaces[i], nil)
+		//rbc := test.NewMockRBC(rbcInterfaces[i], nil)
+		rs := reedsolomon.NewBWCodes(config.Threshold+1, config.NbNodes)
+		rbc := fourrounds.NewFourRoundRBC(nil, sha256.New(), config.Threshold, rbcInterfaces[i], rs, iface.GetID())
 		acss := NewACSS(config, iface, rbc, ks, privateKeys[iface.GetID()], iface.GetID()-1)
 		rbc.SetPredicate(acss.predicate)
 		nodes[i] = &TestNode{
@@ -815,107 +820,96 @@ func TestACSS_RealNetworkStress(t *testing.T) {
 	cancel()
 }
 
-func TestRBC_TimingsMessages(b *testing.T) {
-	b.Skip("Skipping this test by default. Run explicitly if needed.")
-	minThreshold := 5
-	maxThreshold := 10
-
-	stepSize := 5
+func TestACSS_BenchmarkMessages(b *testing.T) {
+	threshold := 50
 
 	config := getDefaultConfig()
 	secret := config.Group.Scalar().SetInt64(1)
 
-	size := (maxThreshold-minThreshold)/5 + 1
-	thresholds := make([]int, size)
-	durations := make([]time.Duration, size)
-	messagesSent := make([][][]byte, size)
+	ctx, cancel := context.WithCancel(context.Background())
 
-	idx := 0
-	for threshold := minThreshold; threshold <= maxThreshold; threshold += stepSize {
-		ctx, cancel := context.WithCancel(context.Background())
+	config.Threshold = threshold
+	config.NbNodes = threshold*3 + 1
 
-		config.Threshold = threshold
-		config.NbNodes = threshold*3 + 1
+	acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
 
-		acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+	nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
 
-		nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
+	startNodes(ctx, b, nodes, context.Canceled)
 
-		startNodes(ctx, b, nodes, context.Canceled)
+	dealer := nodes[0]
 
-		dealer := nodes[0]
+	start := time.Now()
 
-		start := time.Now()
+	// Start ACSS from the dealer
+	instance, err := dealer.acss.Share(secret)
+	require.NoError(b, err)
 
-		// Start ACSS from the dealer
-		_, err := dealer.acss.Share(secret)
+	// Wait for RBC to finish
+	rbcWait := sync.WaitGroup{}
+	for _, node := range nodes {
+		rbcWait.Add(1)
+		go func() {
+			defer rbcWait.Done()
+			select {
+			case <-ctx.Done():
+				return
+			case inst := <-node.acss.GetRBCFinishedChannel():
+				if bytes.Equal(instance.Identifier(), inst.Identifier()) {
+					return
+				}
+			}
+		}()
+	}
+
+	rbcWait.Wait()
+
+	// Reconstruct from all nodes
+	for _, node := range nodes {
+		instance := node.acss.GetInstances()[0]
+		err := node.acss.Reconstruct(instance)
 		require.NoError(b, err)
-
-		// Wait for RBC to finish
-		time.Sleep(500 * time.Millisecond)
-
-		// Reconstruct from all nodes
-		for _, node := range nodes {
-			instance := node.acss.GetInstances()[0]
-			err := node.acss.Reconstruct(instance)
-			require.NoError(b, err)
-		}
-
-		// Wait for all messages to be delivered
-		time.Sleep(500 * time.Millisecond)
-
-		end := time.Now()
-
-		cancel()
-
-		thresholds[idx] = threshold
-		durations[idx] = end.Sub(start)
-		messagesSent[idx] = make([][]byte, 0)
-		for _, node := range nodes {
-			messagesSent[idx] = append(messagesSent[idx], node.rbcInterface.GetSent()...)
-			messagesSent[idx] = append(messagesSent[idx], node.acssInterface.GetSent()...)
-		}
-		idx++
 	}
 
-	saveToCSV(durations, thresholds, messagesSent)
-}
-
-func saveToCSV(timings []time.Duration, thresholds []int, sent [][][]byte) {
-	// Open file for writing
-	file, err := os.Create("output.csv")
-	if err != nil {
-		return
-	}
-	defer file.Close()
-
-	// Create CSV writer
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	// Write header
-	err = writer.Write([]string{"Timing(ms)", "Threshold", "MessageCount"})
-	if err != nil {
-		panic(err)
+	// Wait for all nodes to finish
+	allFinish := sync.WaitGroup{}
+	for _, node := range nodes {
+		allFinish.Add(1)
+		go func() {
+			defer allFinish.Done()
+			select {
+			case <-ctx.Done():
+				return
+			case inst := <-node.acss.GetFinishedChannel():
+				if bytes.Equal(instance.Identifier(), inst.Identifier()) {
+					return
+				}
+			}
+		}()
 	}
 
-	// Write data rows
-	for i := 0; i < len(timings); i++ {
+	// Wait for all nodes to finish
+	allFinish.Wait()
 
-		count := len(sent[i])
-		bytes := int64(0)
-		for _, s := range sent[i] {
-			bytes += int64(len(s))
+	end := time.Now()
+
+	cancel()
+
+	duration := end.Sub(start)
+	messagesSent := 0
+	bytesSent := 0
+	for _, node := range nodes {
+		messagesSent += len(node.rbcInterface.GetReceived())
+		messagesSent += len(node.acssInterface.GetReceived())
+
+		for _, rbcSent := range node.rbcInterface.GetReceived() {
+			bytesSent += len(rbcSent)
 		}
 
-		row := []string{
-			strconv.FormatInt(timings[i].Milliseconds(), 10),
-			strconv.Itoa(thresholds[i]),
-			strconv.Itoa(count),
-			strconv.FormatInt(bytes, 10),
-		}
-		if err := writer.Write(row); err != nil {
-			continue
+		for _, acssSent := range node.acssInterface.GetReceived() {
+			bytesSent += len(acssSent)
 		}
 	}
+
+	fmt.Printf("%s,%s,%s,%s", strconv.FormatInt(duration.Milliseconds(), 10), strconv.Itoa(threshold), strconv.Itoa(messagesSent), strconv.Itoa(bytesSent))
 }

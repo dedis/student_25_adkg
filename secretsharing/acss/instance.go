@@ -15,6 +15,7 @@ type Instance struct {
 	rShare             *share.PriShare
 	sShares            []*share.PriShare
 	reconstructed      bool
+	finished           bool
 	reconstructedValue kyber.Scalar
 	sync.RWMutex
 }
@@ -31,6 +32,12 @@ func (inst *Instance) RBCFinished() bool {
 	inst.RLock()
 	defer inst.RUnlock()
 	return inst.rbcFinished
+}
+
+func (inst *Instance) Finished() bool {
+	inst.RLock()
+	defer inst.RUnlock()
+	return inst.finished
 }
 
 func (inst *Instance) Commit() []kyber.Point {

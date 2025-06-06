@@ -33,8 +33,8 @@ type ACSS struct {
 	ks                   KeyStore
 	privateKey           kyber.Scalar
 	instances            map[string]*Instance
-	reconstructedChannel chan *Instance
-	rbcFinishedChannel   chan *Instance
+	reconstructedChannel chan secretsharing.Instance
+	rbcFinishedChannel   chan secretsharing.Instance
 	nodeIndex            int64
 	logger               zerolog.Logger
 	sync.RWMutex
@@ -49,22 +49,22 @@ func NewACSS(config secretsharing.Config, iface networking.NetworkInterface, rbc
 		ks:                   ks,
 		privateKey:           privateKey,
 		instances:            make(map[string]*Instance),
-		reconstructedChannel: make(chan *Instance, 100),
-		rbcFinishedChannel:   make(chan *Instance, 100),
+		reconstructedChannel: make(chan secretsharing.Instance, 100),
+		rbcFinishedChannel:   make(chan secretsharing.Instance, 100),
 		nodeIndex:            nodeIndex,
 		logger:               logging.GetLogger(nodeIndex),
 	}
 }
 
-func (a *ACSS) GetFinishedChannel() chan *Instance {
+func (a *ACSS) GetFinishedChannel() <-chan secretsharing.Instance {
 	return a.reconstructedChannel
 }
 
-func (a *ACSS) GetRBCFinishedChannel() chan *Instance {
+func (a *ACSS) GetRBCFinishedChannel() <-chan secretsharing.Instance {
 	return a.rbcFinishedChannel
 }
 
-func (a *ACSS) Share(secret kyber.Scalar) (*Instance, error) {
+func (a *ACSS) Share(secret kyber.Scalar) (secretsharing.Instance, error) {
 	// Randomly sample a polynomial s.t. the origin is at s
 	commit, sShares, rShares, err := pedersencommitment.PedPolyCommit(secret, a.config.Threshold,
 		a.config.NbNodes, a.config.Group, a.config.Base0, a.config.Base1)
@@ -101,7 +101,7 @@ func (a *ACSS) Share(secret kyber.Scalar) (*Instance, error) {
 	return instance, nil
 }
 
-func (a *ACSS) Reconstruct(instance *Instance) error {
+func (a *ACSS) Reconstruct(instance secretsharing.Instance) error {
 	if !instance.RBCFinished() {
 		return errors.New("instance is still in sharing phase")
 	}
@@ -136,10 +136,10 @@ func (a *ACSS) Start(ctx context.Context) error {
 }
 
 // GetInstances returns all the instances that this node has received
-func (a *ACSS) GetInstances() []*Instance {
+func (a *ACSS) GetInstances() []secretsharing.Instance {
 	a.RLock()
 	defer a.RUnlock()
-	instances := make([]*Instance, 0, len(a.instances))
+	instances := make([]secretsharing.Instance, 0, len(a.instances))
 	for _, i := range a.instances {
 		instances = append(instances, i)
 	}

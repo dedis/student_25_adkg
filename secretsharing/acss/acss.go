@@ -34,6 +34,7 @@ type ACSS struct {
 	privateKey           kyber.Scalar
 	instances            map[string]*Instance
 	reconstructedChannel chan *Instance
+	rbcFinishedChannel   chan *Instance
 	nodeIndex            int64
 	logger               zerolog.Logger
 	sync.RWMutex
@@ -49,9 +50,18 @@ func NewACSS(config secretsharing.Config, iface networking.NetworkInterface, rbc
 		privateKey:           privateKey,
 		instances:            make(map[string]*Instance),
 		reconstructedChannel: make(chan *Instance, 100),
+		rbcFinishedChannel:   make(chan *Instance, 100),
 		nodeIndex:            nodeIndex,
 		logger:               logging.GetLogger(nodeIndex),
 	}
+}
+
+func (a *ACSS) GetFinishedChannel() chan *Instance {
+	return a.reconstructedChannel
+}
+
+func (a *ACSS) GetRBCFinishedChannel() chan *Instance {
+	return a.rbcFinishedChannel
 }
 
 func (a *ACSS) Share(secret kyber.Scalar) (*Instance, error) {
@@ -232,6 +242,7 @@ func (a *ACSS) handleFinishedRBC(state rbc.Instance[[]byte]) {
 	}
 
 	instance.SetRBCResult(commit, si, ri)
+	a.rbcFinishedChannel <- instance
 }
 
 // parseRBCPayload returns the commit and the shares marshalled into the RBC payload used by ACSS. Return an

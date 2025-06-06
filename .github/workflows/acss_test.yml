@@ -37,5 +37,5 @@ jobs:
         run: |
           mkdir -p ./${{ github.run_attempt }}
       
-      - name: run AVSS tests
+      - name: run ACSS tests
         run: go test -json -v -race ./secretsharing/... | gotestfmt

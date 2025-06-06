@@ -3,7 +3,10 @@ package acss
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/csv"
 	"errors"
+	"os"
+	"strconv"
 	"student_25_adkg/networking"
 	"student_25_adkg/pedersencommitment"
 	"student_25_adkg/secretsharing"
@@ -810,4 +813,109 @@ func TestACSS_RealNetworkStress(t *testing.T) {
 	checkReconstruction(t, nodes, instance.Identifier(), secret, true, true)
 
 	cancel()
+}
+
+func TestRBC_TimingsMessages(b *testing.T) {
+	b.Skip("Skipping this test by default. Run explicitly if needed.")
+	minThreshold := 5
+	maxThreshold := 10
+
+	stepSize := 5
+
+	config := getDefaultConfig()
+	secret := config.Group.Scalar().SetInt64(1)
+
+	size := (maxThreshold-minThreshold)/5 + 1
+	thresholds := make([]int, size)
+	durations := make([]time.Duration, size)
+	messagesSent := make([][][]byte, size)
+
+	idx := 0
+	for threshold := minThreshold; threshold <= maxThreshold; threshold += stepSize {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		config.Threshold = threshold
+		config.NbNodes = threshold*3 + 1
+
+		acssInterfaces, rbcInterfaces, ks, privateKeys := setupTest(config)
+
+		nodes := createTestNodes(acssInterfaces, rbcInterfaces, ks, privateKeys, config)
+
+		startNodes(ctx, b, nodes, context.Canceled)
+
+		dealer := nodes[0]
+
+		start := time.Now()
+
+		// Start ACSS from the dealer
+		_, err := dealer.acss.Share(secret)
+		require.NoError(b, err)
+
+		// Wait for RBC to finish
+		time.Sleep(500 * time.Millisecond)
+
+		// Reconstruct from all nodes
+		for _, node := range nodes {
+			instance := node.acss.GetInstances()[0]
+			err := node.acss.Reconstruct(instance)
+			require.NoError(b, err)
+		}
+
+		// Wait for all messages to be delivered
+		time.Sleep(500 * time.Millisecond)
+
+		end := time.Now()
+
+		cancel()
+
+		thresholds[idx] = threshold
+		durations[idx] = end.Sub(start)
+		messagesSent[idx] = make([][]byte, 0)
+		for _, node := range nodes {
+			messagesSent[idx] = append(messagesSent[idx], node.rbcInterface.GetSent()...)
+			messagesSent[idx] = append(messagesSent[idx], node.acssInterface.GetSent()...)
+		}
+		idx++
+	}
+
+	saveToCSV(durations, thresholds, messagesSent)
+}
+
+func saveToCSV(timings []time.Duration, thresholds []int, sent [][][]byte) {
+	// Open file for writing
+	file, err := os.Create("output.csv")
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	// Create CSV writer
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// Write header
+	err = writer.Write([]string{"Timing(ms)", "Threshold", "MessageCount"})
+	if err != nil {
+		panic(err)
+	}
+
+	// Write data rows
+	for i := 0; i < len(timings); i++ {
+
+		count := len(sent[i])
+		bytes := int64(0)
+		for _, s := range sent[i] {
+			bytes += int64(len(s))
+		}
+
+		row := []string{
+			strconv.FormatInt(timings[i].Milliseconds(), 10),
+			strconv.Itoa(thresholds[i]),
+			strconv.Itoa(count),
+			strconv.FormatInt(bytes, 10),
+		}
+		if err := writer.Write(row); err != nil {
+			continue
+		}
+	}
 }

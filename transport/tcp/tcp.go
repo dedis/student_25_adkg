@@ -1,6 +1,8 @@
 package tcp
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -79,17 +81,23 @@ func (s *Socket) handleConnection(conn net.Conn) {
 			return
 		}
 
-		var pkt transport.Packet
-		err = pkt.Unmarshal(buf[:n])
-		if err != nil {
-			log.Info().Msgf("error unmarshaling pkt %s %v", pkt, err)
-			continue
-		}
+		dec := json.NewDecoder(bytes.NewReader(buf[:n]))
 
-		select {
-		case s.incoming <- pkt:
-		default:
-			log.Info().Msgf("drop packet from %s because incoming buffer is full", pkt)
+		for {
+			var pkt transport.Packet
+			if err := dec.Decode(&pkt); err != nil {
+				if err == io.EOF {
+					break
+				}
+				log.Info().Msgf("error decoding pkt: %v", err)
+				break // or continue
+			}
+
+			select {
+			case s.incoming <- pkt:
+			default:
+				log.Info().Msgf("drop packet from %s because incoming buffer is full", pkt)
+			}
 		}
 	}
 }

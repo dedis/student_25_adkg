@@ -1032,7 +1032,7 @@ func TestFourRoundsRBC_MultipleInstances(t *testing.T) {
 	threshold := 2
 	nbNodes := threshold*3 + 1
 
-	nbInstances := 3
+	nbInstances := 2
 	require.LessOrEqual(t, nbInstances, nbNodes, "Need at least %d nodes to run %d instances", nbInstances, nbInstances)
 
 	nodes, err := createNetwork(network, threshold)

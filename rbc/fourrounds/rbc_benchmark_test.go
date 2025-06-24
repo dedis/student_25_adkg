@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/csv"
 	"errors"
-	"fmt"
 	"os"
 	"strconv"
 	"student_25_adkg/networking"
@@ -151,7 +150,6 @@ func TestRBC_TimingsMessages(b *testing.T) {
 }
 
 func saveToCSV(t require.TestingT, timings []time.Duration, thresholds []int, messages [][][]byte) {
-	fmt.Println("Writing to CSV")
 	// Open file for writing
 	file, err := os.Create("output.csv")
 	require.NoError(t, err)

@@ -54,10 +54,9 @@ func createDefaultNetworkTestNode(network networking.Network, mLen int) *TestNod
 
 // Generate a random message of the given size and return its hash along
 func generateMessage(l int) ([]byte, []byte) {
-	r := rand.New(rand.NewSource(99))
 	s := make([]byte, l)
 	for i := 0; i < l; i++ {
-		s[i] = byte(r.Intn(256))
+		s[i] = byte(rand.Intn(256))
 	}
 	hash := sha256.New()
 	hash.Write(s)
@@ -624,9 +623,9 @@ func runBroadcast(ctx context.Context, t require.TestingT, nodes []*TestNode, ms
 // checkRBCResult checks that the state of the given node reflect a successful completion of
 // an RBC algorithm given the reliably broadcast message msg. Doesn't return true of false but
 // makes the testing fail in case of a problem
-func checkRBCResult(t *testing.T, nodes []*TestNode, msg, msgHash []byte) {
+func checkRBCResult(t *testing.T, nodes []*TestNode, msg, msgHash []byte, nbInstances int) {
 	for _, node := range nodes {
-		require.Equal(t, 1, len(node.rbc.GetInstances()))
+		require.Equal(t, nbInstances, len(node.rbc.GetInstances()))
 		state, ok := node.rbc.GetState(msgHash)
 		require.True(t, ok)
 		require.True(t, state.Finished())
@@ -638,7 +637,7 @@ func checkRBCResult(t *testing.T, nodes []*TestNode, msg, msgHash []byte) {
 
 func runAndCheckRBC(ctx context.Context, t *testing.T, nodes []*TestNode, msg, msgHash []byte) {
 	runBroadcast(ctx, t, nodes, msg, msgHash, context.Canceled, true)
-	checkRBCResult(t, nodes, msg, msgHash)
+	checkRBCResult(t, nodes, msg, msgHash, 1)
 }
 
 // TestFourRoundsRBC_Simple creates a network with a threshold t=2 and n=3*t+1 nodes
@@ -881,7 +880,7 @@ func TestFourRoundsRBC_DealAndDies(t *testing.T) {
 	wg.Wait()
 
 	// Check that everything worked
-	checkRBCResult(t, nodesAlive, message, hash)
+	checkRBCResult(t, nodesAlive, message, hash, 1)
 	cancel()
 }
 
@@ -944,7 +943,7 @@ func runWithDyingListeners(t *testing.T, threshold, nbDying int) {
 	wgDead.Wait()
 
 	// Check that everything worked for all nodes alive
-	checkRBCResult(t, nodesAlive, message, hash)
+	checkRBCResult(t, nodesAlive, message, hash, 1)
 
 	// Check that the last node did not finish
 	for _, dyingNode := range dyingNodes {
@@ -1054,7 +1053,7 @@ func TestFourRoundsRBC_MultipleInstances(t *testing.T) {
 		wgs.Add(1)
 		go func() {
 			wg.Wait()
-			checkRBCResult(t, nodes, message, hash)
+			checkRBCResult(t, nodes, message, hash, nbInstances)
 			wgs.Done()
 		}()
 	}

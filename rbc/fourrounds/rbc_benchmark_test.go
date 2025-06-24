@@ -106,7 +106,7 @@ func Benchmark_Threshold20(b *testing.B) {
 }
 
 func TestRBC_TimingsMessages(b *testing.T) {
-	//b.Skip("Skipping this test by default. Run explicitly if needed.")
+	b.Skip("Skipping this test by default. Run explicitly if needed.")
 	minThreshold := 5
 	maxThreshold := 35
 

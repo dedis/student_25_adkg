@@ -18,7 +18,6 @@ message RBCMessage{
     bytes messageHash=2;
     int64 index=3;
   }
-
   oneof op{
     Propose propose_inst=1;
     Echo echo_inst=2;
@@ -26,8 +25,52 @@ message RBCMessage{
   }
 }
 
+message SSMessage{
+  message Share{
+    repeated bytes si=1;
+    repeated bytes ri=2;
+  }
+
+  message Reconstruct{
+    bytes si=1;
+    bytes ri=2;
+  }
+
+  oneof op{
+    SSMessage.Share share_inst=1;
+    SSMessage.Reconstruct reconstruct_inst=2;
+  }
+}
+
+message ACSSMessage {
+  message RBCPayload {
+    repeated bytes encryptedShares=1;
+    bytes commitment=2;
+  }
+
+  message Implicate {
+    int64 index=1;
+    bytes secretKey=2;
+  }
+
+  message Recover {
+    int64 index=1;
+    bytes secretKey=2;
+  }
+
+  oneof op{
+    Implicate implicate_inst=1;
+    Recover recover_inst=2;
+    SSMessage.Reconstruct reconstruct_inst=3;
+  }
+  bytes instanceIdentifier=4;
+
+}
+
 message Packet {
   oneof message {
     RBCMessage rbcMessage=1;
+    SSMessage ss_message_inst=2;
+    ACSSMessage acssMessage=3;
   }
 }

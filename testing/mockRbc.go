@@ -94,7 +94,7 @@ func NewMockRBC(iface networking.NetworkInterface, predicate func([]byte) bool) 
 	}
 }
 
-func (m *MockRBC) SetPredicate(predicate func([]byte) bool) {
+func (m *MockRBC) SetPredicate(predicate rbc.Predicate) {
 	m.Lock()
 	defer m.Unlock()
 	m.predicate = predicate
@@ -108,6 +108,16 @@ func (m *MockRBC) getOrCreateInstance(hash []byte) *Instance {
 	state = NewInstance(hash)
 	m.states[string(hash)] = state
 	return state
+}
+
+func (m *MockRBC) GetInstances() []rbc.Instance[[]byte] {
+	m.RLock()
+	defer m.RUnlock()
+	instances := make([]rbc.Instance[[]byte], 0)
+	for _, state := range m.states {
+		instances = append(instances, state)
+	}
+	return instances
 }
 
 func (m *MockRBC) RBroadcast(msg []byte) (rbc.Instance[[]byte], error) {

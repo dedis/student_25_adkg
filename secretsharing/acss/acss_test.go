@@ -116,7 +116,7 @@ func createTestNodes(interfaces, rbcInterfaces []networking.NetworkInterface, ks
 	for i, iface := range interfaces {
 		//rbc := test.NewMockRBC(rbcInterfaces[i], nil)
 		rs := reedsolomon.NewBWCodes(config.Threshold+1, config.NbNodes)
-		rbc := fourrounds.NewFourRoundRBC(nil, sha256.New(), config.Threshold, rbcInterfaces[i], rs, iface.GetID())
+		rbc := fourrounds.NewFourRoundRBC(sha256.New(), config.Threshold, rbcInterfaces[i], rs, iface.GetID())
 		acss := NewACSS(config, iface, rbc, ks, privateKeys[iface.GetID()], iface.GetID()-1)
 		rbc.SetPredicate(acss.predicate)
 		nodes[i] = &TestNode{
